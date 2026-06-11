@@ -58,9 +58,12 @@ def get_random_github_photo():
         images = get_github_photos()
         if not images:
             return None, None
-        chosen = random.choice(images)
-        # Download via raw URL
-        raw_url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/{GITHUB_BRANCH}/{chosen['name']}"
+        safe_images = [f for f in images
+                       if " " not in f["name"] and "(" not in f["name"]]
+        if not safe_images:
+            safe_images = images
+        chosen = random.choice(safe_images)
+        raw_url = chosen["download_url"]
         res = requests.get(raw_url, timeout=30)
         if res.status_code == 200:
             return res.content, chosen["name"]
@@ -123,6 +126,9 @@ def detect_model(filename):
     if "DK4510" in fn or "DK45" in fn: return "DK4510", "DK SERIE  •  45 PS"
     if "RX6010" in fn or "RX60" in fn: return "RX6010", "RX SERIE  •  60 PS"
     if "RX7320" in fn or "RX73" in fn: return "RX7320", "RX SERIE  •  73 PS"
+    if "RX8040" in fn or "RX80" in fn: return "RX8040", "RX SERIE  •  80 PS"
+    if "K92410" in fn or "K924" in fn: return "K92410", "K SERIE  •  92 PS"
+    if "CK3530" in fn or "CK3530CH" in fn: return "CK3530CH", "CK SERIE  •  35 PS  •  KABINE"
     return "KIOTI", "KIOTI TRAKTOREN"
 
 def generate_image(photo_bytes, text, model_name="KIOTI", series_label="KIOTI TRAKTOREN"):
