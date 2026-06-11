@@ -16,9 +16,9 @@ FONT_REG  = "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
 W, H = 1080, 1920
 KIOTI_RED = (210, 35, 15)
 
-# Box public shared folder
-BOX_SHARED_LINK = "https://kiotieu.app.box.com/s/hcks458vsmhx5uzebjzhp4ng4kaz6mlx"
-BOX_FOLDER_ID   = "361915396170"
+GITHUB_USER = "LorenzStephan"
+GITHUB_REPO = "kioti-image-api"
+GITHUB_BRANCH = "main"
 
 PROMPTS = [
     "Schreibe einen WhatsApp-Post für Kioti Traktoren. Max. 2 kurze Sätze. Direkt, stark, ein Emoji. Ende mit: Meld dich jetzt! Nur den Post.",
@@ -26,6 +26,8 @@ PROMPTS = [
     "Schreibe einen WhatsApp-Post für Kioti Traktoren. Thema: Fairer Preis. Max. 2 Sätze. Direkt, kein Weichspüler, ein Emoji. Ende mit: Meld dich jetzt! Nur den Post.",
     "Schreibe einen WhatsApp-Post für Kioti Traktoren. Thema: Sofort verfügbar, keine Wartezeit. Max. 2 Sätze. Dringlichkeit, ein Emoji. Ende mit: Meld dich jetzt! Nur den Post.",
     "Schreibe einen WhatsApp-Post für Kioti Traktoren. Thema: Zuverlässigkeit für Lohnunternehmer. Max. 2 Sätze. Stark, ein Emoji. Ende mit: Meld dich jetzt! Nur den Post.",
+    "Schreibe einen WhatsApp-Post für Kioti Traktoren. Thema: Weinbau und Obstbau. Max. 2 Sätze. Präzise, ein Emoji. Ende mit: Meld dich jetzt! Nur den Post.",
+    "Schreibe einen WhatsApp-Post für Kioti Traktoren. Thema: Kommunale Fahrzeuge. Max. 2 Sätze. Sachlich, stark, ein Emoji. Ende mit: Meld dich jetzt! Nur den Post.",
 ]
 
 def fnt(size, bold=True):
@@ -35,30 +37,37 @@ def fnt(size, bold=True):
     except:
         return ImageFont.load_default()
 
-def get_random_box_photo():
-    """Get a random photo from the public Box folder"""
+def get_github_photos():
+    """Get list of image files from GitHub repo root"""
     try:
-        # Use Box shared link API
-        headers = {"BoxApi": f"shared_link={BOX_SHARED_LINK}"}
-        url = f"https://api.box.com/2.0/folders/{BOX_FOLDER_ID}/items?limit=200&fields=id,name,type"
-        res = requests.get(url, headers=headers, timeout=15)
-        data = res.json()
-        # Filter only image files
-        images = [f for f in data.get("entries", [])
+        url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/"
+        res = requests.get(url, timeout=15)
+        files = res.json()
+        images = [f for f in files
                   if f.get("type") == "file" and
                   any(f.get("name","").lower().endswith(ext)
                       for ext in [".jpg",".jpeg",".png",".webp"])]
-        if not images:
-            return None
-        chosen = random.choice(images)
-        file_id = chosen["id"]
-        # Download the file
-        dl_url = f"https://api.box.com/2.0/files/{file_id}/content"
-        dl_res = requests.get(dl_url, headers=headers, timeout=30)
-        return dl_res.content, chosen["name"]
+        return images
     except Exception as e:
-        print(f"Box error: {e}")
-        return None
+        print(f"GitHub list error: {e}")
+        return []
+
+def get_random_github_photo():
+    """Get a random photo from GitHub repo"""
+    try:
+        images = get_github_photos()
+        if not images:
+            return None, None
+        chosen = random.choice(images)
+        # Download via raw URL
+        raw_url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/{GITHUB_BRANCH}/{chosen['name']}"
+        res = requests.get(raw_url, timeout=30)
+        if res.status_code == 200:
+            return res.content, chosen["name"]
+        return None, None
+    except Exception as e:
+        print(f"GitHub photo error: {e}")
+        return None, None
 
 def get_claude_text(prompt):
     try:
@@ -78,7 +87,7 @@ def get_claude_text(prompt):
         )
         data = res.json()
         return data["content"][0]["text"].strip()
-    except Exception as e:
+    except:
         return "🚜 Kioti – robust, zuverlässig, fair. Meld dich jetzt!"
 
 def wrap_text(text, font, max_width, draw):
@@ -104,10 +113,10 @@ def shadow_text(draw, x, y, text, font, col, alpha=255):
     draw.text((x,y), text, font=font, fill=(r,g,b,alpha))
 
 def detect_model(filename):
-    """Detect Kioti model from filename"""
     fn = filename.upper()
     if "HX1403" in fn or "HX140" in fn: return "HX1403", "HX SERIE  •  140 PS"
     if "CS2530" in fn: return "CS2530CH", "CS SERIE  •  25 PS  •  KABINE"
+    if "CS2520" in fn: return "CS2520H", "CS SERIE  •  25 PS"
     if "CS2220" in fn: return "CS2220", "CS SERIE  •  22 PS"
     if "CK2510" in fn or "CK25" in fn: return "CK2510", "CK SERIE  •  25 PS"
     if "CK3510" in fn or "CK35" in fn: return "CK3510", "CK SERIE  •  35 PS"
@@ -219,16 +228,14 @@ def generate_image(photo_bytes, text, model_name="KIOTI", series_label="KIOTI TR
 
 @app.route('/health', methods=['GET'])
 def health():
-    return jsonify({"status":"ok","service":"Kioti Image Generator"})
+    return jsonify({"status":"ok","service":"Kioti Image Generator","photos": len(get_github_photos())})
 
 @app.route('/daily', methods=['GET'])
 def daily():
-    """Main endpoint: get random Box photo, generate text, return image as base64"""
     try:
-        result = get_random_box_photo()
-        if not result:
-            return jsonify({"error":"Could not fetch photo from Box"}), 500
-        photo_bytes, filename = result
+        photo_bytes, filename = get_random_github_photo()
+        if not photo_bytes:
+            return jsonify({"error":"Could not fetch photo from GitHub"}), 500
         model_name, series_label = detect_model(filename)
         prompt = random.choice(PROMPTS)
         text = get_claude_text(prompt)
