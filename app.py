@@ -2,6 +2,8 @@ from flask import Flask, request, jsonify, send_file
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
 import numpy as np
 import requests
+import re
+import urllib.parse
 import io
 import os
 import base64
@@ -11,7 +13,6 @@ from datetime import datetime
 app = Flask(__name__)
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 FONT_BOLD = "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"
 FONT_REG  = "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
 W, H = 1080, 1920
@@ -19,7 +20,6 @@ KIOTI_RED = (210, 35, 15)
 
 GITHUB_USER = "LorenzStephan"
 GITHUB_REPO = "kioti-image-api"
-GITHUB_BRANCH = "main"
 
 PROMPTS = [
     "Schreibe einen WhatsApp-Post für Kioti Traktoren. Max. 2 kurze Sätze. Direkt, stark, ein Emoji. Ende mit: Meld dich jetzt! Nur den Post.",
@@ -31,12 +31,6 @@ PROMPTS = [
     "Schreibe einen WhatsApp-Post für Kioti Traktoren. Thema: Kommunale Fahrzeuge. Max. 2 Sätze. Sachlich, stark, ein Emoji. Ende mit: Meld dich jetzt! Nur den Post.",
 ]
 
-def github_headers():
-    headers = {"Accept": "application/vnd.github.v3+json"}
-    if GITHUB_TOKEN:
-        headers["Authorization"] = f"token {GITHUB_TOKEN}"
-    return headers
-
 def fnt(size, bold=True):
     path = FONT_BOLD if bold else FONT_REG
     try:
@@ -45,34 +39,43 @@ def fnt(size, bold=True):
         return ImageFont.load_default()
 
 def get_github_photos():
+    """Holt Dateiliste durch Scrapen der GitHub-Seite - kein Token, kein Rate Limit"""
     try:
-        url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/"
-        res = requests.get(url, headers=github_headers(), timeout=15)
-        res.raise_for_status()
-        files = res.json()
-        images = [f for f in files
-                  if f.get("type") == "file" and
-                  any(f.get("name","").lower().endswith(ext)
-                      for ext in [".jpg",".jpeg",".png",".webp"])]
+        res = requests.get(
+            f"https://github.com/{GITHUB_USER}/{GITHUB_REPO}",
+            timeout=15
+        )
+        pattern = r'href="[^"]+/blob/main/([^"]+\.(?:jpg|jpeg|png|webp))"'
+        matches = re.findall(pattern, res.text, re.IGNORECASE)
+        seen = set()
+        images = []
+        for m in matches:
+            decoded = urllib.parse.unquote(m)
+            if decoded not in seen:
+                seen.add(decoded)
+                images.append(decoded)
+        print(f"GitHub photos found: {len(images)}")
         return images
     except Exception as e:
         print(f"GitHub list error: {e}")
         return []
 
 def get_random_github_photo():
+    """Lädt zufälliges Bild direkt über raw.githubusercontent - kein Token nötig"""
     try:
         images = get_github_photos()
         if not images:
             return None, None
-        safe_images = [f for f in images
-                       if " " not in f["name"] and "(" not in f["name"]]
+        safe_images = [f for f in images if " " not in f and "(" not in f]
         if not safe_images:
             safe_images = images
         chosen = random.choice(safe_images)
-        raw_url = chosen["download_url"]
-        res = requests.get(raw_url, headers=github_headers(), timeout=30)
+        encoded = urllib.parse.quote(chosen)
+        raw_url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/main/{encoded}"
+        res = requests.get(raw_url, timeout=30)
         if res.status_code == 200:
-            return res.content, chosen["name"]
+            return res.content, chosen
+        print(f"Photo download failed: {res.status_code} for {raw_url}")
         return None, None
     except Exception as e:
         print(f"GitHub photo error: {e}")
@@ -249,7 +252,8 @@ def generate_image(photo_bytes, text, model_name="KIOTI", series_label="KIOTI TR
 
 @app.route('/health', methods=['GET'])
 def health():
-    return jsonify({"status":"ok","service":"Kioti Image Generator","photos": len(get_github_photos())})
+    photos = get_github_photos()
+    return jsonify({"status":"ok","service":"Kioti Image Generator","photos": len(photos)})
 
 @app.route('/daily', methods=['GET'])
 def daily():
