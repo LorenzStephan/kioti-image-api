@@ -11,6 +11,7 @@ from datetime import datetime
 app = Flask(__name__)
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 FONT_BOLD = "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"
 FONT_REG  = "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
 W, H = 1080, 1920
@@ -30,6 +31,12 @@ PROMPTS = [
     "Schreibe einen WhatsApp-Post für Kioti Traktoren. Thema: Kommunale Fahrzeuge. Max. 2 Sätze. Sachlich, stark, ein Emoji. Ende mit: Meld dich jetzt! Nur den Post.",
 ]
 
+def github_headers():
+    headers = {"Accept": "application/vnd.github.v3+json"}
+    if GITHUB_TOKEN:
+        headers["Authorization"] = f"token {GITHUB_TOKEN}"
+    return headers
+
 def fnt(size, bold=True):
     path = FONT_BOLD if bold else FONT_REG
     try:
@@ -40,7 +47,8 @@ def fnt(size, bold=True):
 def get_github_photos():
     try:
         url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/"
-        res = requests.get(url, timeout=15)
+        res = requests.get(url, headers=github_headers(), timeout=15)
+        res.raise_for_status()
         files = res.json()
         images = [f for f in files
                   if f.get("type") == "file" and
@@ -62,7 +70,7 @@ def get_random_github_photo():
             safe_images = images
         chosen = random.choice(safe_images)
         raw_url = chosen["download_url"]
-        res = requests.get(raw_url, timeout=30)
+        res = requests.get(raw_url, headers=github_headers(), timeout=30)
         if res.status_code == 200:
             return res.content, chosen["name"]
         return None, None
@@ -80,7 +88,7 @@ def get_claude_text(prompt):
                 "Content-Type": "application/json"
             },
             json={
-                "model": "claude-opus-4-5",
+                "model": "claude-sonnet-4-6",
                 "max_tokens": 120,
                 "messages": [{"role": "user", "content": prompt}]
             },
