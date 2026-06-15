@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, url_for
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
 import numpy as np
 import requests
@@ -21,6 +21,10 @@ KIOTI_RED = (210, 35, 15)
 GITHUB_USER = "LorenzStephan"
 GITHUB_REPO = "kioti-image-api"
 
+_cached_image = None
+_cached_text = None
+_cached_filename = None
+
 PROMPTS = [
     "Schreibe einen WhatsApp-Post für Kioti Traktoren. Max. 2 kurze Sätze. Direkt, stark, ein Emoji. Ende mit: Meld dich jetzt! Nur den Post.",
     "Schreibe einen WhatsApp-Post für Kioti Traktoren. Thema: 7 Jahre Garantie. Max. 2 Sätze. Provokant, ein Emoji. Ende mit: Meld dich jetzt! Nur den Post.",
@@ -39,7 +43,6 @@ def fnt(size, bold=True):
         return ImageFont.load_default()
 
 def get_github_photos():
-    """Holt Dateiliste durch Scrapen der GitHub-Seite - kein Token, kein Rate Limit"""
     try:
         res = requests.get(
             f"https://github.com/{GITHUB_USER}/{GITHUB_REPO}",
@@ -54,14 +57,12 @@ def get_github_photos():
             if decoded not in seen:
                 seen.add(decoded)
                 images.append(decoded)
-        print(f"GitHub photos found: {len(images)}")
         return images
     except Exception as e:
         print(f"GitHub list error: {e}")
         return []
 
 def get_random_github_photo():
-    """Lädt zufälliges Bild direkt über raw.githubusercontent - kein Token nötig"""
     try:
         images = get_github_photos()
         if not images:
@@ -75,7 +76,6 @@ def get_random_github_photo():
         res = requests.get(raw_url, timeout=30)
         if res.status_code == 200:
             return res.content, chosen
-        print(f"Photo download failed: {res.status_code} for {raw_url}")
         return None, None
     except Exception as e:
         print(f"GitHub photo error: {e}")
@@ -257,6 +257,7 @@ def health():
 
 @app.route('/daily', methods=['GET'])
 def daily():
+    global _cached_image, _cached_text, _cached_filename
     try:
         photo_bytes, filename = get_random_github_photo()
         if not photo_bytes:
@@ -265,9 +266,12 @@ def daily():
         prompt = random.choice(PROMPTS)
         text = get_claude_text(prompt)
         img_buf = generate_image(photo_bytes, text, model_name, series_label)
-        img_b64 = base64.b64encode(img_buf.read()).decode()
+        _cached_image = img_buf.read()
+        _cached_text = text
+        _cached_filename = filename
+        image_url = "https://kioti-image-api.onrender.com/image"
         return jsonify({
-            "image_base64": img_b64,
+            "image_url": image_url,
             "text": text,
             "model": model_name,
             "filename": filename,
@@ -275,6 +279,15 @@ def daily():
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route('/image', methods=['GET'])
+def serve_image():
+    global _cached_image, _cached_filename
+    if not _cached_image:
+        return "No image cached yet. Call /daily first.", 404
+    buf = io.BytesIO(_cached_image)
+    fname = _cached_filename if _cached_filename else "kioti_daily.jpg"
+    return send_file(buf, mimetype='image/jpeg', download_name=fname)
 
 @app.route('/daily-image', methods=['GET'])
 def daily_image():
