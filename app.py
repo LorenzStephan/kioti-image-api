@@ -6,7 +6,6 @@ import re
 import urllib.parse
 import io
 import os
-import base64
 import random
 import math
 from datetime import datetime
@@ -16,6 +15,8 @@ app = Flask(__name__)
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 FONT_BOLD = "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"
 FONT_REG  = "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
+
+GW, GH = 540, 960
 W, H = 1080, 1920
 KIOTI_RED = (210, 35, 15)
 
@@ -25,6 +26,7 @@ GITHUB_REPO = "kioti-image-api"
 _cached_image = None
 _cached_text = None
 _cached_filename = None
+_cached_mimetype = 'image/gif'
 
 ANIMATION_STYLES = ["slide_left", "slide_bottom", "fade_scale", "typewriter", "bounce"]
 
@@ -38,12 +40,10 @@ PROMPTS = [
     "Schreibe einen WhatsApp-Post für Kioti Traktoren. Thema: Kommunale Fahrzeuge. Max. 2 Sätze. Sachlich, stark, ein Emoji. Ende mit: Meld dich jetzt! Nur den Post.",
 ]
 
-def fnt(size, bold=True):
+def fnt(size, bold=True, scale=1.0):
     path = FONT_BOLD if bold else FONT_REG
-    try:
-        return ImageFont.truetype(path, size)
-    except:
-        return ImageFont.load_default()
+    try: return ImageFont.truetype(path, int(size * scale))
+    except: return ImageFont.load_default()
 
 def ease_out(t): return 1 - (1-t)**3
 def ease_bounce(t):
@@ -70,15 +70,11 @@ def get_github_photos():
 def get_random_github_photo():
     try:
         images = get_github_photos()
-        if not images:
-            return None, None
-        safe_images = [f for f in images if " " not in f and "(" not in f]
-        if not safe_images:
-            safe_images = images
-        chosen = random.choice(safe_images)
+        if not images: return None, None
+        safe = [f for f in images if " " not in f and "(" not in f]
+        chosen = random.choice(safe if safe else images)
         encoded = urllib.parse.quote(chosen)
-        raw_url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/main/{encoded}"
-        res = requests.get(raw_url, timeout=30)
+        res = requests.get(f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/main/{encoded}", timeout=30)
         if res.status_code == 200:
             return res.content, chosen
         return None, None
@@ -109,14 +105,13 @@ def wrap_text(text, font, max_width, draw):
             current = [word]
         else:
             current.append(word)
-    if current:
-        lines.append(" ".join(current))
+    if current: lines.append(" ".join(current))
     return lines
 
 def shadow_text(draw, x, y, text, font, col, alpha=255):
     r, g, b = col
-    for ox, oy in [(4,4),(3,3),(2,2)]:
-        draw.text((x+ox, y+oy), text, font=font, fill=(0,0,0,min(210,alpha)))
+    for ox, oy in [(2,2),(1,1)]:
+        draw.text((x+ox, y+oy), text, font=font, fill=(0,0,0,min(200,alpha)))
     draw.text((x,y), text, font=font, fill=(r,g,b,alpha))
 
 def detect_model(filename):
@@ -144,7 +139,7 @@ def detect_model(filename):
     if "ZXS" in fn: return "KIOTI ZXS", "UTILITY VEHICLE"
     return "KIOTI", "KIOTI TRAKTOREN"
 
-def prepare_base_image(photo_bytes):
+def prepare_base(photo_bytes, w, h):
     img = Image.open(io.BytesIO(photo_bytes))
     try:
         from PIL import ExifTags
@@ -158,223 +153,192 @@ def prepare_base_image(photo_bytes):
     except: pass
 
     ow, oh = img.size
-    tr = W/H; ir = ow/oh
+    tr = w/h; ir = ow/oh
     if ir > tr:
         nw=int(oh*tr); x0=(ow-nw)//2; img=img.crop((x0,0,x0+nw,oh))
     else:
         nh=int(ow/tr); y0=(oh-nh)//2; img=img.crop((0,y0,ow,y0+nh))
-    img = img.resize((W,H),Image.LANCZOS)
+    img = img.resize((w,h), Image.LANCZOS)
     img = ImageEnhance.Contrast(img).enhance(1.25)
     img = ImageEnhance.Color(img).enhance(1.3)
     img = img.convert('RGBA')
 
-    grad = Image.new('RGBA',(W,H),(0,0,0,0))
+    grad = Image.new('RGBA',(w,h),(0,0,0,0))
     gd = ImageDraw.Draw(grad)
-    for i in range(H):
-        if i < 350: a=int(190*(350-i)/350)
-        elif i > int(H*0.35): a=int(245*(i-H*0.35)/(H*0.65))
+    for i in range(h):
+        if i < int(h*0.18): a=int(190*(h*0.18-i)/(h*0.18))
+        elif i > int(h*0.35): a=int(245*(i-h*0.35)/(h*0.65))
         else: a=0
-        gd.line([(0,i),(W,i)],fill=(0,0,0,a))
+        gd.line([(0,i),(w,i)], fill=(0,0,0,a))
     img = Image.alpha_composite(img, grad)
 
+    scale = w/W
     logo_path = os.path.join(os.path.dirname(__file__), "logo.png")
     logo_raw = Image.open(logo_path).convert('RGBA')
     data = np.array(logo_raw)
     black = (data[:,:,0]<40)&(data[:,:,1]<40)&(data[:,:,2]<40)
     data[:,:,3] = np.where(black,0,255)
     logo = Image.fromarray(data)
-    lw=320; lh=int(lw*logo.height/logo.width)
-    logo = logo.resize((lw,lh),Image.LANCZOS)
-    img.paste(logo,(55,45),logo)
+    lw=int(320*scale); lh=int(lw*logo.height/logo.width)
+    logo = logo.resize((lw,lh), Image.LANCZOS)
+    img.paste(logo,(int(55*scale),int(45*scale)),logo)
 
     badge_path = os.path.join(os.path.dirname(__file__), "badge.png")
     badge = Image.open(badge_path).convert('RGBA')
-    bw=210; bh=int(bw*badge.height/badge.width)
-    badge = badge.resize((bw,bh),Image.LANCZOS)
-    img.paste(badge,(W-bw-50,42),badge)
+    bw=int(210*scale); bh=int(bw*badge.height/badge.width)
+    badge = badge.resize((bw,bh), Image.LANCZOS)
+    img.paste(badge,(w-bw-int(50*scale),int(42*scale)),badge)
 
     draw = ImageDraw.Draw(img)
-    draw.rectangle([(0,0),(W,10)], fill=(*KIOTI_RED,255))
-    draw.rectangle([(0,H-10),(W,H)], fill=(*KIOTI_RED,255))
+    draw.rectangle([(0,0),(w,int(10*scale))], fill=(*KIOTI_RED,255))
+    draw.rectangle([(0,h-int(10*scale)),(w,h)], fill=(*KIOTI_RED,255))
     return img
 
-def draw_animated_frame(base_img, style, t, text, model_name, series_label):
-    frame = base_img.copy()
+def draw_frame(base, style, t, text, model_name, series_label, w, h):
+    scale = w/W
+    frame = base.copy()
     d = ImageDraw.Draw(frame)
-    f_label = fnt(44); f_model = fnt(130); f_text = fnt(62)
-    f_sub = fnt(44, bold=False); f_cta = fnt(60)
-    Y = H - 850
-    lines = wrap_text(text, f_text, W-130, d)
+    f_label = fnt(44, scale=scale)
+    f_model = fnt(130, scale=scale)
+    f_text = fnt(62, scale=scale)
+    f_sub = fnt(44, bold=False, scale=scale)
+    f_cta = fnt(60, scale=scale)
+    Y = h - int(850*scale)
+    lines = wrap_text(text, f_text, w-int(130*scale), d)
+    x0 = int(65*scale)
 
     if style == "slide_left":
-        p1 = ease_out(min(1.0, t*3.0))
-        p2 = ease_out(min(1.0, max(0, t*3.0-0.25)))
-        p3 = ease_out(min(1.0, max(0, t*3.0-0.55)))
-        p4 = ease_out(min(1.0, max(0, t*3.0-0.85)))
-        shadow_text(d, int(-500+p1*565), Y, series_label, f_label, (170,170,170))
-        d.rectangle([(int(-300+p2*365),Y+68),(int(-300+p2*365)+235,Y+72)], fill=(*KIOTI_RED,255))
-        shadow_text(d, int(-600+p2*650), Y+94, model_name, f_model, (255,255,255))
-        ty = Y+249
-        for i, line in enumerate(lines[:4]):
-            col = KIOTI_RED if i==len(lines)-1 else (255,255,255)
-            shadow_text(d, int(-500+p3*565), ty, line, f_text, col)
-            ty += 76
-        a4 = int(p4*255)
-        shadow_text(d, 65, ty+10, "7 Jahre Garantie auf den Antriebsstrang.", f_sub, (185,185,185), a4)
-        shadow_text(d, 65, ty+72, "Meld dich jetzt!", f_cta, KIOTI_RED, a4)
+        p1=ease_out(min(1.0,t*3.0)); p2=ease_out(min(1.0,max(0,t*3.0-0.25)))
+        p3=ease_out(min(1.0,max(0,t*3.0-0.55))); p4=ease_out(min(1.0,max(0,t*3.0-0.85)))
+        shadow_text(d,int(-500*scale+p1*(500*scale+x0)),Y,series_label,f_label,(170,170,170))
+        shadow_text(d,int(-600*scale+p2*(600*scale+x0-int(15*scale))),Y+int(94*scale),model_name,f_model,(255,255,255))
+        ty=Y+int(249*scale)
+        for i,line in enumerate(lines[:4]):
+            shadow_text(d,int(-500*scale+p3*(500*scale+x0)),ty,line,f_text,KIOTI_RED if i==len(lines)-1 else (255,255,255))
+            ty+=int(76*scale)
+        a4=int(p4*255)
+        shadow_text(d,x0,ty+int(10*scale),"7 Jahre Garantie auf den Antriebsstrang.",f_sub,(185,185,185),a4)
+        shadow_text(d,x0,ty+int(72*scale),"Meld dich jetzt!",f_cta,KIOTI_RED,a4)
 
     elif style == "slide_bottom":
-        p1 = ease_out(min(1.0, t*2.5))
-        p2 = ease_out(min(1.0, max(0, t*2.5-0.2)))
-        p3 = ease_out(min(1.0, max(0, t*2.5-0.45)))
-        p4 = ease_out(min(1.0, max(0, t*2.5-0.75)))
-        shadow_text(d, 65, Y+int((1-p1)*350), series_label, f_label, (170,170,170))
-        shadow_text(d, 65, Y+94+int((1-p2)*350), model_name, f_model, (255,255,255))
-        ty = Y+249
-        for i, line in enumerate(lines[:4]):
-            col = KIOTI_RED if i==len(lines)-1 else (255,255,255)
-            shadow_text(d, 65, ty+int((1-p3)*350), line, f_text, col)
-            ty += 76
-        a4 = int(p4*255)
-        shadow_text(d, 65, ty+10, "7 Jahre Garantie auf den Antriebsstrang.", f_sub, (185,185,185), a4)
-        shadow_text(d, 65, ty+72, "Meld dich jetzt!", f_cta, KIOTI_RED, a4)
+        p1=ease_out(min(1.0,t*2.5)); p2=ease_out(min(1.0,max(0,t*2.5-0.2)))
+        p3=ease_out(min(1.0,max(0,t*2.5-0.45))); p4=ease_out(min(1.0,max(0,t*2.5-0.75)))
+        off=int(350*scale)
+        shadow_text(d,x0,Y+int((1-p1)*off),series_label,f_label,(170,170,170))
+        shadow_text(d,x0,Y+int(94*scale)+int((1-p2)*off),model_name,f_model,(255,255,255))
+        ty=Y+int(249*scale)
+        for i,line in enumerate(lines[:4]):
+            shadow_text(d,x0,ty+int((1-p3)*off),line,f_text,KIOTI_RED if i==len(lines)-1 else (255,255,255))
+            ty+=int(76*scale)
+        a4=int(p4*255)
+        shadow_text(d,x0,ty+int(10*scale),"7 Jahre Garantie auf den Antriebsstrang.",f_sub,(185,185,185),a4)
+        shadow_text(d,x0,ty+int(72*scale),"Meld dich jetzt!",f_cta,KIOTI_RED,a4)
 
     elif style == "fade_scale":
-        p1 = min(1.0, t*3.0)
-        p2 = min(1.0, max(0, t*3.0-0.3))
-        p3 = min(1.0, max(0, t*3.0-0.6))
-        p4 = min(1.0, max(0, t*3.0-0.85))
-        shadow_text(d, 65, Y, series_label, f_label, (170,170,170), int(p1*255))
-        shadow_text(d, 65, Y+94, model_name, f_model, (255,255,255), int(p2*255))
-        ty = Y+249
-        for i, line in enumerate(lines[:4]):
-            col = KIOTI_RED if i==len(lines)-1 else (255,255,255)
-            shadow_text(d, 65, ty, line, f_text, col, int(p3*255))
-            ty += 76
-        a4 = int(p4*255)
-        shadow_text(d, 65, ty+10, "7 Jahre Garantie auf den Antriebsstrang.", f_sub, (185,185,185), a4)
-        shadow_text(d, 65, ty+72, "Meld dich jetzt!", f_cta, KIOTI_RED, a4)
+        p1=min(1.0,t*3.0); p2=min(1.0,max(0,t*3.0-0.3))
+        p3=min(1.0,max(0,t*3.0-0.6)); p4=min(1.0,max(0,t*3.0-0.85))
+        shadow_text(d,x0,Y,series_label,f_label,(170,170,170),int(p1*255))
+        shadow_text(d,x0,Y+int(94*scale),model_name,f_model,(255,255,255),int(p2*255))
+        ty=Y+int(249*scale)
+        for i,line in enumerate(lines[:4]):
+            shadow_text(d,x0,ty,line,f_text,KIOTI_RED if i==len(lines)-1 else (255,255,255),int(p3*255))
+            ty+=int(76*scale)
+        a4=int(p4*255)
+        shadow_text(d,x0,ty+int(10*scale),"7 Jahre Garantie auf den Antriebsstrang.",f_sub,(185,185,185),a4)
+        shadow_text(d,x0,ty+int(72*scale),"Meld dich jetzt!",f_cta,KIOTI_RED,a4)
 
     elif style == "typewriter":
-        full_model = model_name
-        full_text = " ".join(lines[:4])
-        shown_model = full_model[:int(min(len(full_model), t*len(full_model)*4))]
-        shown_text = full_text[:int(min(len(full_text), max(0, (t-0.3)*len(full_text)*3)))]
-        shadow_text(d, 65, Y, series_label, f_label, (170,170,170))
-        shadow_text(d, 65, Y+94, shown_model, f_model, (255,255,255))
-        if int(t*12)%2==0 and len(shown_model)<len(full_model):
-            bbox = d.textbbox((65,Y+94), shown_model, font=f_model)
-            shadow_text(d, bbox[2]+8, Y+94, "|", f_model, KIOTI_RED)
-        ty = Y+249
-        tw = wrap_text(shown_text, f_text, W-130, d)
-        for i, line in enumerate(tw[:4]):
-            shadow_text(d, 65, ty, line, f_text, (255,255,255))
-            ty += 76
+        full_text=" ".join(lines[:4])
+        shown_model=model_name[:int(min(len(model_name),t*len(model_name)*4))]
+        shown_text=full_text[:int(min(len(full_text),max(0,(t-0.3)*len(full_text)*3)))]
+        shadow_text(d,x0,Y,series_label,f_label,(170,170,170))
+        shadow_text(d,x0,Y+int(94*scale),shown_model,f_model,(255,255,255))
+        if int(t*12)%2==0 and len(shown_model)<len(model_name):
+            bb=d.textbbox((x0,Y+int(94*scale)),shown_model,font=f_model)
+            shadow_text(d,bb[2]+int(8*scale),Y+int(94*scale),"|",f_model,KIOTI_RED)
+        ty=Y+int(249*scale)
+        tw=wrap_text(shown_text,f_text,w-int(130*scale),d)
+        for line in tw[:4]:
+            shadow_text(d,x0,ty,line,f_text,(255,255,255)); ty+=int(76*scale)
         if int(t*12)%2==0 and shown_text:
-            shadow_text(d, 65, ty, "|", f_text, KIOTI_RED)
-        a4 = int(min(255, max(0, (t-0.8)*8*255)))
-        shadow_text(d, 65, Y+249+4*76+10, "7 Jahre Garantie auf den Antriebsstrang.", f_sub, (185,185,185), a4)
-        shadow_text(d, 65, Y+249+4*76+72, "Meld dich jetzt!", f_cta, KIOTI_RED, a4)
+            shadow_text(d,x0,ty,"|",f_text,KIOTI_RED)
+        a4=int(min(255,max(0,(t-0.8)*8*255)))
+        shadow_text(d,x0,Y+int(249*scale)+4*int(76*scale)+int(10*scale),"7 Jahre Garantie auf den Antriebsstrang.",f_sub,(185,185,185),a4)
+        shadow_text(d,x0,Y+int(249*scale)+4*int(76*scale)+int(72*scale),"Meld dich jetzt!",f_cta,KIOTI_RED,a4)
 
     elif style == "bounce":
-        p1 = ease_bounce(min(1.0, t*2.5))
-        p2 = ease_bounce(min(1.0, max(0, t*2.5-0.2)))
-        p3 = ease_bounce(min(1.0, max(0, t*2.5-0.5)))
-        p4 = ease_bounce(min(1.0, max(0, t*2.5-0.8)))
-        shadow_text(d, 65, Y+int((1-p1)*-250), series_label, f_label, (170,170,170))
-        shadow_text(d, 65, Y+94+int((1-p2)*300), model_name, f_model, (255,255,255))
-        ty = Y+249
-        for i, line in enumerate(lines[:4]):
-            col = KIOTI_RED if i==len(lines)-1 else (255,255,255)
-            shadow_text(d, 65, ty+int((1-p3)*200), line, f_text, col)
-            ty += 76
-        a4 = int(p4*255)
-        shadow_text(d, 65, ty+10, "7 Jahre Garantie auf den Antriebsstrang.", f_sub, (185,185,185), a4)
-        shadow_text(d, 65, ty+72, "Meld dich jetzt!", f_cta, KIOTI_RED, a4)
+        p1=ease_bounce(min(1.0,t*2.5)); p2=ease_bounce(min(1.0,max(0,t*2.5-0.2)))
+        p3=ease_bounce(min(1.0,max(0,t*2.5-0.5))); p4=ease_bounce(min(1.0,max(0,t*2.5-0.8)))
+        shadow_text(d,x0,Y+int((1-p1)*-250*scale),series_label,f_label,(170,170,170))
+        shadow_text(d,x0,Y+int(94*scale)+int((1-p2)*300*scale),model_name,f_model,(255,255,255))
+        ty=Y+int(249*scale)
+        for i,line in enumerate(lines[:4]):
+            shadow_text(d,x0,ty+int((1-p3)*200*scale),line,f_text,KIOTI_RED if i==len(lines)-1 else (255,255,255))
+            ty+=int(76*scale)
+        a4=int(p4*255)
+        shadow_text(d,x0,ty+int(10*scale),"7 Jahre Garantie auf den Antriebsstrang.",f_sub,(185,185,185),a4)
+        shadow_text(d,x0,ty+int(72*scale),"Meld dich jetzt!",f_cta,KIOTI_RED,a4)
 
     return frame.convert('RGB')
 
 def generate_animated_gif(photo_bytes, text, model_name, series_label, style):
-    base_img = prepare_base_image(photo_bytes)
-    fps = 20
-    duration = 3
-    total_frames = fps * duration
-    frames = []
-    for i in range(total_frames):
-        t = i / total_frames
-        frame = draw_animated_frame(base_img, style, t, text, model_name, series_label)
-        frames.append(frame)
-    # Letztes Frame 2 Sekunden stehen lassen
-    hold_frames = fps * 2
-    for _ in range(hold_frames):
-        frames.append(frames[-1])
-
+    base = prepare_base(photo_bytes, GW, GH)
+    fps = 12
+    total_frames = int(fps * 2.5)
+    frames = [draw_frame(base, style, i/total_frames, text, model_name, series_label, GW, GH)
+              for i in range(total_frames)]
+    for _ in range(fps): frames.append(frames[-1])
     buf = io.BytesIO()
     frames[0].save(buf, format='GIF', save_all=True, append_images=frames[1:],
                    duration=int(1000/fps), loop=0, optimize=True)
     buf.seek(0)
     return buf
 
-def generate_static_image(photo_bytes, text, model_name, series_label):
-    base_img = prepare_base_image(photo_bytes)
-    frame = draw_animated_frame(base_img, "fade_scale", 1.0, text, model_name, series_label)
-    buf = io.BytesIO()
-    frame.save(buf, "JPEG", quality=92)
-    buf.seek(0)
-    return buf
-
 @app.route('/health', methods=['GET'])
 def health():
-    photos = get_github_photos()
-    return jsonify({"status":"ok","service":"Kioti Image Generator","photos":len(photos),"styles":ANIMATION_STYLES})
+    return jsonify({"status":"ok","service":"Kioti Image Generator","photos":len(get_github_photos()),"styles":ANIMATION_STYLES})
 
 @app.route('/daily', methods=['GET'])
 def daily():
-    global _cached_image, _cached_text, _cached_filename
+    global _cached_image, _cached_text, _cached_filename, _cached_mimetype
     try:
         photo_bytes, filename = get_random_github_photo()
         if not photo_bytes:
             return jsonify({"error":"Could not fetch photo from GitHub"}), 500
         model_name, series_label = detect_model(filename)
-        prompt = random.choice(PROMPTS)
-        text = get_claude_text(prompt)
+        text = get_claude_text(random.choice(PROMPTS))
         style = random.choice(ANIMATION_STYLES)
         img_buf = generate_animated_gif(photo_bytes, text, model_name, series_label, style)
         _cached_image = img_buf.read()
         _cached_text = text
-        _cached_filename = filename.replace('.jpg','.gif').replace('.jpeg','.gif').replace('.png','.gif')
+        _cached_filename = "kioti_daily.gif"
+        _cached_mimetype = 'image/gif'
         return jsonify({
             "image_url": "https://kioti-image-api.onrender.com/image",
-            "text": text,
-            "model": model_name,
-            "style": style,
-            "filename": _cached_filename,
-            "date": datetime.now().strftime("%d.%m.%Y")
+            "text": text, "model": model_name, "style": style,
+            "filename": _cached_filename, "date": datetime.now().strftime("%d.%m.%Y")
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route('/image', methods=['GET'])
 def serve_image():
-    global _cached_image, _cached_filename
+    global _cached_image, _cached_filename, _cached_mimetype
     if not _cached_image:
         return "No image cached yet. Call /daily first.", 404
-    buf = io.BytesIO(_cached_image)
-    fname = _cached_filename if _cached_filename else "kioti_daily.gif"
-    mimetype = 'image/gif' if fname.endswith('.gif') else 'image/jpeg'
-    return send_file(buf, mimetype=mimetype, download_name=fname)
+    return send_file(io.BytesIO(_cached_image), mimetype=_cached_mimetype,
+                     download_name=_cached_filename or "kioti_daily.gif")
 
 @app.route('/daily-image', methods=['GET'])
 def daily_image():
     try:
         photo_bytes, filename = get_random_github_photo()
-        if not photo_bytes:
-            return "No photo", 500
+        if not photo_bytes: return "No photo", 500
         model_name, series_label = detect_model(filename)
         text = get_claude_text(random.choice(PROMPTS))
         style = random.choice(ANIMATION_STYLES)
-        img_buf = generate_animated_gif(photo_bytes, text, model_name, series_label, style)
-        return send_file(img_buf, mimetype='image/gif', download_name='kioti_daily.gif')
+        buf = generate_animated_gif(photo_bytes, text, model_name, series_label, style)
+        return send_file(buf, mimetype='image/gif', download_name='kioti_daily.gif')
     except Exception as e:
         return str(e), 500
 
@@ -384,14 +348,12 @@ def generate():
         if 'photo' not in request.files:
             return jsonify({"error":"No photo"}), 400
         photo_bytes = request.files['photo'].read()
-        text = request.form.get('text','').strip()
-        if not text:
-            text = get_claude_text(random.choice(PROMPTS))
+        text = request.form.get('text','').strip() or get_claude_text(random.choice(PROMPTS))
         model_name = request.form.get('model','KIOTI')
         series_label = request.form.get('series','KIOTI TRAKTOREN')
         style = request.form.get('style', random.choice(ANIMATION_STYLES))
-        img_buf = generate_animated_gif(photo_bytes, text, model_name, series_label, style)
-        return send_file(img_buf, mimetype='image/gif',
+        buf = generate_animated_gif(photo_bytes, text, model_name, series_label, style)
+        return send_file(buf, mimetype='image/gif',
                         download_name=f'kioti_{datetime.now().strftime("%Y%m%d")}.gif')
     except Exception as e:
         return jsonify({"error":str(e)}), 500
