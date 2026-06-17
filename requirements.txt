@@ -1,5 +1,4 @@
 flask
-pillow
-numpy
-requests
+flask-cors
+Pillow
 gunicorn
