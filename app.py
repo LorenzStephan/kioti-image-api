@@ -42,9 +42,10 @@ MODEL_DB = {
     'CK5030':  {'series': 'CK SERIE', 'ps': '50 PS', 'display': 'CK5030'},
     'K92410':  {'series': 'K9 SERIE', 'ps': '24 PS', 'display': 'K92410'},
     'K9':      {'series': 'K9 SERIE', 'ps': '24 PS', 'display': 'K92410'},
+    'HX1402':  {'series': 'HX SERIE', 'ps': '140 PS', 'display': 'HX1402ATC'},
 }
 
-# ─── IMAGE LIST CACHE (1 hour) ────────────────────────────────────────────────
+# ─── IMAGE LIST CACHE (1 Stunde) ─────────────────────────────────────────────
 
 _cache = {'images': [], 'ts': 0}
 
@@ -68,7 +69,7 @@ def get_github_images():
     except Exception:
         pass
 
-    # Fallback: hard-coded filenames wenn API nicht erreichbar
+    # Fallback: Hard-coded Dateinamen wenn GitHub API nicht erreichbar
     raw_base = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main"
     fallback_names = [
         "1_Kioti_CS2220_CS2520H - Kopie.jpg",
@@ -88,6 +89,8 @@ def get_github_images():
         "CS2530CH_Kioti_027.jpg",
         "CS2530CH_Kioti_073.jpg",
         "CS2530CH_Kioti_078.jpg",
+        "K9_2410C_01_Jagd_IMC07434.jpg",
+        "KIOTI_HX1402ATC-EU_MediaWeek-.jpg",
     ]
     files = [{'name': n,
               'download_url': f"{raw_base}/{requests.utils.quote(n)}"}
@@ -154,13 +157,14 @@ def compose(ctx) -> Image.Image:
     # 2. Auf 9:16 Portrait zuschneiden
     if bg.width / bg.height > TW / TH:
         nw = int(bg.height * TW / TH)
-        bg = bg.crop(((bg.width - nw) // 2, 0, (bg.width - nw) // 2 + nw, bg.height))
+        bg = bg.crop(((bg.width - nw) // 2, 0,
+                      (bg.width - nw) // 2 + nw, bg.height))
     else:
         nh = int(bg.width * TH / TW)
         bg = bg.crop((0, 0, bg.width, nh))
     bg = bg.resize((TW, TH), Image.LANCZOS)
 
-    # 3. Dunkler Gradient unten
+    # 3. Dunkler Gradient unten + oben
     ov  = Image.new('RGBA', (TW, TH), (0, 0, 0, 0))
     dov = ImageDraw.Draw(ov)
     s = int(TH * 0.32)
@@ -208,14 +212,17 @@ def compose(ctx) -> Image.Image:
     # Roter Button
     btn_y = cta_y + 148
     bw, bh = 500, 82
-    d.rounded_rectangle([(PAD, btn_y), (PAD + bw, btn_y + bh)], radius=10, fill=RED)
-    bb = d.textbbox((0, 0), "Meld dich jetzt!", font=f_btn)
-    tw = bb[2] - bb[0]; tbh = bb[3] - bb[1]
+    d.rounded_rectangle([(PAD, btn_y), (PAD + bw, btn_y + bh)],
+                         radius=10, fill=RED)
+    bb  = d.textbbox((0, 0), "Meld dich jetzt!", font=f_btn)
+    tw  = bb[2] - bb[0]
+    tbh = bb[3] - bb[1]
     d.text((PAD + (bw - tw) // 2, btn_y + (bh - tbh) // 2),
            "Meld dich jetzt!", fill=WHITE, font=f_btn)
 
     # Datum unten
-    d.text((PAD, TH - 50), f"{ctx['day']}, {ctx['date']}", fill=DGRAY, font=f_date)
+    d.text((PAD, TH - 50),
+           f"{ctx['day']}, {ctx['date']}", fill=DGRAY, font=f_date)
 
     return canvas
 
@@ -224,6 +231,7 @@ def compose(ctx) -> Image.Image:
 @app.route('/')
 def health():
     return jsonify({'status': 'ok', 'service': 'Kioti Daily Image API'})
+
 
 @app.route('/daily')
 def daily():
@@ -245,7 +253,9 @@ def daily():
         'ps':        m['ps'],
         'marketing': ctx['marketing'],
         'text':      text,
+        'quote':     text,        # ← Make.com Outlook "content" Feld
     })
+
 
 @app.route('/image')
 def image():
@@ -256,6 +266,7 @@ def image():
     buf.seek(0)
     return send_file(buf, mimetype='image/jpeg',
                      download_name='kioti_daily.jpg')
+
 
 # ─── ENTRY POINT ─────────────────────────────────────────────────────────────
 
