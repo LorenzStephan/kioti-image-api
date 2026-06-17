@@ -254,6 +254,7 @@ def daily():
         'marketing': ctx['marketing'],
         'text':      text,
         'quote':     text,        # ← Make.com Outlook "content" Feld
+        'photo_url': ctx['image']['download_url'] if ctx['image'] else '',  # ← NEU: Querformat-Original für E-Mail
     })
 
 
