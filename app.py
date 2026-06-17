@@ -1,158 +1,225 @@
+import io
+import os
+import time
+import textwrap
+import requests
+from datetime import datetime
 from flask import Flask, jsonify, send_file
 from flask_cors import CORS
 from PIL import Image, ImageDraw, ImageFont
-import io
-from datetime import datetime
-import os
-import textwrap
 
 app = Flask(__name__)
 CORS(app)
 
-DAYS = [
-    'Sonntag', 'Montag', 'Dienstag', 'Mittwoch',
-    'Donnerstag', 'Freitag', 'Samstag'
-]
-MONTHS = [
-    'Januar', 'Februar', 'Maerz', 'April', 'Mai', 'Juni',
-    'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'
-]
-QUOTES = [
-    'Dein Gebiet. Deine Entscheidung. Dein Erfolg.',
-    'Ein Nein heute ist ein Ja morgen - bleib dran.',
-    'Jeder Haendler, den du entwickelst, multipliziert deinen Umsatz.',
-    'Verkauf beginnt nicht beim Produkt, sondern bei der Beziehung.',
-    'Champions arbeiten nicht haerter - sie arbeiten smarter.',
-    'Konstanz schlaegt Talent - jeden Tag ein bisschen mehr.',
-    'Wer kein Ziel hat, trifft auch keines.',
+# ─── CONFIG ──────────────────────────────────────────────────────────────────
+
+GITHUB_REPO  = "LorenzStephan/kioti-image-api"
+GITHUB_API   = f"https://api.github.com/repos/{GITHUB_REPO}/contents"
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
+
+DAYS   = ['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag']
+MONTHS = ['Januar','Februar','Maerz','April','Mai','Juni',
+          'Juli','August','September','Oktober','November','Dezember']
+
+MARKETING = [
+    "Kioti Traktoren liefern erstklassige Qualitaet zu einem Preis, der dich nicht arm macht.",
+    "Zuverlaessig. Kraftvoll. Erschwinglich. Das ist Kioti.",
+    "Mehr Leistung. Weniger Kosten. 7 Jahre Garantie inklusive.",
+    "Der smarte Einstieg in die professionelle Landtechnik.",
+    "Qualitaet, die haelt. Garantie, die ueberzeugt. Preis, der begeistert.",
+    "Stark im Feld. Stark im Preis. Stark in der Garantie.",
+    "7 Jahre Sorglos-Garantie. Weil wir an unsere Traktoren glauben.",
 ]
 
-FOCUS_ITEMS = [
-    ('Haendlerkontakte',      '3'),
-    ('Vorführung / Demo',     '1'),
-    ('Neuer Haendlerkontakt', '1'),
-]
+MODEL_DB = {
+    'CS2220':  {'series': 'CS SERIE', 'ps': '22 PS', 'display': 'CS2220'},
+    'CS2520H': {'series': 'CS SERIE', 'ps': '25 PS', 'display': 'CS2520H'},
+    'CS2520':  {'series': 'CS SERIE', 'ps': '25 PS', 'display': 'CS2520'},
+    'CS2530':  {'series': 'CS SERIE', 'ps': '25 PS', 'display': 'CS2530CH'},
+    'CK3530':  {'series': 'CK SERIE', 'ps': '35 PS', 'display': 'CK3530CH'},
+    'CK4030':  {'series': 'CK SERIE', 'ps': '40 PS', 'display': 'CK4030'},
+    'CK5030H': {'series': 'CK SERIE', 'ps': '50 PS', 'display': 'CK5030H'},
+    'CK5030':  {'series': 'CK SERIE', 'ps': '50 PS', 'display': 'CK5030'},
+    'K92410':  {'series': 'K9 SERIE', 'ps': '24 PS', 'display': 'K92410'},
+    'K9':      {'series': 'K9 SERIE', 'ps': '24 PS', 'display': 'K92410'},
+}
 
-TERRITORIES = ['BW', 'RLP', 'SL', 'CH']
+# ─── IMAGE LIST CACHE (1 hour) ────────────────────────────────────────────────
+
+_cache = {'images': [], 'ts': 0}
+
+def get_github_images():
+    global _cache
+    if time.time() - _cache['ts'] < 3600 and _cache['images']:
+        return _cache['images']
+
+    headers = {'Accept': 'application/vnd.github.v3+json'}
+    if GITHUB_TOKEN:
+        headers['Authorization'] = f'token {GITHUB_TOKEN}'
+
+    try:
+        r = requests.get(GITHUB_API, headers=headers, timeout=10)
+        r.raise_for_status()
+        files = [f for f in r.json()
+                 if isinstance(f, dict) and f.get('name', '').lower().endswith('.jpg')]
+        if files:
+            _cache = {'images': files, 'ts': time.time()}
+            return files
+    except Exception:
+        pass
+
+    # Fallback: hard-coded filenames wenn API nicht erreichbar
+    raw_base = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main"
+    fallback_names = [
+        "1_Kioti_CS2220_CS2520H - Kopie.jpg",
+        "48_Kioti_K92410_K92410C.jpg",
+        "CK4030_P1076647.jpg",
+        "CK4030_P1076665.jpg",
+        "CK4030_P1076822.jpg",
+        "CK5030H_P1075333.jpg",
+        "CK5030_P1076911.jpg",
+        "CK5030_P1076925.jpg",
+        "CK_3530CH_FL_Oct_23 (1 von 25).jpg",
+        "CS2220_P1073567.jpg",
+        "CS2220_P1075471.jpg",
+        "CS2520_P1073682.jpg",
+        "CS2530CH_Kioti_025.jpg",
+        "CS2530CH_Kioti_026.jpg",
+        "CS2530CH_Kioti_027.jpg",
+        "CS2530CH_Kioti_073.jpg",
+        "CS2530CH_Kioti_078.jpg",
+    ]
+    files = [{'name': n,
+              'download_url': f"{raw_base}/{requests.utils.quote(n)}"}
+             for n in fallback_names]
+    _cache = {'images': files, 'ts': time.time()}
+    return files
+
+# ─── HELPERS ─────────────────────────────────────────────────────────────────
 
 def js_weekday():
     return (datetime.now().weekday() + 1) % 7
 
-def build_data():
-    now = datetime.now()
-    wd  = js_weekday()
+def extract_model(filename):
+    name = filename.upper()
+    for code in sorted(MODEL_DB, key=len, reverse=True):
+        if code in name:
+            return MODEL_DB[code]
+    return {'series': 'KIOTI', 'ps': '', 'display': 'KIOTI'}
+
+def build_context():
+    now    = datetime.now()
+    wd     = js_weekday()
+    doy    = now.timetuple().tm_yday
+    images = get_github_images()
+    chosen = images[doy % len(images)] if images else None
     return {
-        'day':   DAYS[wd],
-        'date':  f"{now.day}. {MONTHS[now.month - 1]} {now.year}",
-        'quote': QUOTES[wd % len(QUOTES)],
+        'day':       DAYS[wd],
+        'date':      f"{now.day}. {MONTHS[now.month - 1]} {now.year}",
+        'model':     extract_model(chosen['name'] if chosen else ''),
+        'marketing': MARKETING[wd % len(MARKETING)],
+        'image':     chosen,
     }
 
-def load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
+def load_font(size, bold=False):
     suffix = '-Bold' if bold else '-Regular'
-    candidates = [
+    for path in [
         f'/usr/share/fonts/truetype/liberation/LiberationSans{suffix}.ttf',
         f'/usr/share/fonts/truetype/dejavu/DejaVuSans{"-Bold" if bold else ""}.ttf',
-        f'/usr/share/fonts/truetype/freefont/FreeSans{"Bold" if bold else ""}.ttf',
-    ]
-    for path in candidates:
+    ]:
         if os.path.exists(path):
             return ImageFont.truetype(path, size)
     return ImageFont.load_default()
 
-def draw_card(data: dict) -> Image.Image:
-    W, H = 1080, 1920
+# ─── IMAGE COMPOSER ──────────────────────────────────────────────────────────
 
-    BG     = (2,   4,  9)
-    ORANGE = (232, 90, 43)
-    WHITE  = (255, 255, 255)
-    LGRAY  = (160, 160, 160)
-    DGRAY  = (60,  60,  60)
-    CARDBG = (14,  20,  40)
+def compose(ctx) -> Image.Image:
+    TW, TH = 1080, 1920
+    RED   = (220, 30,  30)
+    WHITE = (255, 255, 255)
+    LGRAY = (200, 200, 200)
+    DGRAY = (140, 140, 140)
 
-    img = Image.new('RGB', (W, H), BG)
-    d   = ImageDraw.Draw(img)
+    # 1. Hintergrundbild von GitHub laden
+    if ctx['image']:
+        try:
+            r = requests.get(ctx['image']['download_url'], timeout=20)
+            r.raise_for_status()
+            bg = Image.open(io.BytesIO(r.content)).convert('RGB')
+        except Exception:
+            bg = Image.new('RGB', (TW, TH), (15, 15, 15))
+    else:
+        bg = Image.new('RGB', (TW, TH), (15, 15, 15))
 
-    f_xs  = load_font(34)
-    f_sm  = load_font(42)
-    f_md  = load_font(56)
-    f_lg  = load_font(78, bold=True)
-    f_xl  = load_font(132, bold=True)
-    f_hdr = load_font(96, bold=True)
+    # 2. Auf 9:16 Portrait zuschneiden
+    if bg.width / bg.height > TW / TH:
+        nw = int(bg.height * TW / TH)
+        bg = bg.crop(((bg.width - nw) // 2, 0, (bg.width - nw) // 2 + nw, bg.height))
+    else:
+        nh = int(bg.width * TH / TW)
+        bg = bg.crop((0, 0, bg.width, nh))
+    bg = bg.resize((TW, TH), Image.LANCZOS)
 
-    PAD = 90
+    # 3. Dunkler Gradient unten
+    ov  = Image.new('RGBA', (TW, TH), (0, 0, 0, 0))
+    dov = ImageDraw.Draw(ov)
+    s = int(TH * 0.32)
+    for y in range(TH - s):
+        a = int(220 * (y / (TH - s)) ** 1.15)
+        dov.line([(0, s + y), (TW, s + y)], fill=(0, 0, 0, min(a, 220)))
+    for y in range(180):
+        a = int(120 * (1 - y / 180))
+        dov.line([(0, y), (TW, y)], fill=(0, 0, 0, a))
 
-    d.rectangle([(0, 0), (10, H)], fill=ORANGE)
+    canvas = Image.alpha_composite(bg.convert('RGBA'), ov).convert('RGB')
+    d = ImageDraw.Draw(canvas)
 
-    d.text((PAD, 100), "KIOTI", fill=ORANGE, font=f_hdr)
-    d.text((PAD, 215), "TERRITORIAL SALES MANAGER", fill=LGRAY, font=f_xs)
-    d.line([(PAD, 295), (W - PAD, 295)], fill=ORANGE, width=4)
+    # 4. Fonts
+    f_logo   = load_font(100, bold=True)
+    f_series = load_font(48)
+    f_model  = load_font(130, bold=True)
+    f_body   = load_font(50,  bold=True)
+    f_cta    = load_font(62,  bold=True)
+    f_small  = load_font(40)
+    f_btn    = load_font(52,  bold=True)
+    f_date   = load_font(36)
 
-    d.text((PAD, 335), data['day'].upper(), fill=ORANGE, font=f_md)
-    d.text((PAD, 408), data['date'],        fill=LGRAY,  font=f_sm)
+    PAD   = 80
+    model = ctx['model']
 
-    d.text((PAD, 540), "Heute",     fill=WHITE,  font=f_xl)
-    d.text((PAD, 682), "gewinnen.", fill=ORANGE, font=f_xl)
-    d.text((PAD, 855), "Jeder Kontakt zaehlt - jede Stunde entscheidet.",
-           fill=DGRAY, font=f_sm)
+    # 5. KIOTI Logo oben links
+    d.text((PAD, 70), "KIOTI", fill=RED, font=f_logo)
 
-    d.text((PAD, 960), "MEIN GEBIET", fill=DGRAY, font=f_xs)
-    bx = PAD
-    for badge in TERRITORIES:
-        bw = 140
-        d.rounded_rectangle(
-            [(bx, 1005), (bx + bw, 1068)],
-            radius=22, outline=ORANGE, width=3, fill=CARDBG
-        )
-        bb = d.textbbox((0, 0), badge, font=f_md)
-        tw = bb[2] - bb[0]
-        th = bb[3] - bb[1]
-        d.text((bx + (bw - tw) // 2, 1005 + (63 - th) // 2),
-               badge, fill=ORANGE, font=f_md)
-        bx += 158
+    # 6. Textblock unten
+    base_y = TH - 760
 
-    d.line([(PAD, 1118), (W - PAD, 1118)], fill=DGRAY, width=1)
-    d.text((PAD, 1142), "TAGESFOKUS", fill=DGRAY, font=f_xs)
+    d.text((PAD, base_y),
+           f"{model['series']}  •  {model['ps']}", fill=LGRAY, font=f_series)
+    d.text((PAD, base_y + 58), model['display'], fill=WHITE, font=f_model)
 
-    fy = 1205
-    for txt, num in FOCUS_ITEMS:
-        box_h = 98
-        d.rounded_rectangle(
-            [(PAD, fy), (W - PAD, fy + box_h)],
-            radius=14, fill=CARDBG, outline=DGRAY, width=1
-        )
-        d.text((PAD + 28, fy + (box_h - 56) // 2), txt,
-               fill=WHITE, font=f_md)
-        nb = d.textbbox((0, 0), num, font=f_lg)
-        nw = nb[2] - nb[0]
-        d.text((W - PAD - nw - 24, fy + 8), num, fill=ORANGE, font=f_lg)
-        fy += 118
+    wrapped = textwrap.fill(ctx['marketing'], width=26)
+    d.text((PAD, base_y + 225), wrapped, fill=WHITE, font=f_body)
 
-    fy += 48
-    d.rectangle([(PAD, fy), (PAD + 6, fy + 130)], fill=ORANGE)
-    wrapped_quote = textwrap.fill(data['quote'], width=40)
-    d.text((PAD + 26, fy + 8), wrapped_quote, fill=LGRAY, font=f_sm)
+    cta_y = base_y + 465
+    d.text((PAD, cta_y), "Meld dich jetzt!", fill=RED, font=f_cta)
+    d.text((PAD, cta_y + 82),
+           "7 Jahre Garantie auf den Antriebsstrang.", fill=DGRAY, font=f_small)
 
-    tx, ty = W - 340, fy - 20
-    sc = 1.3
-    d.ellipse([(tx, ty), (tx+130*sc, ty+130*sc)], outline=ORANGE, width=10)
-    d.ellipse([(tx+48*sc, ty+48*sc), (tx+82*sc, ty+82*sc)], fill=ORANGE)
-    body_pts = [
-        (tx+130*sc, ty+40*sc), (tx+220*sc, ty+40*sc),
-        (tx+228*sc, ty+52*sc), (tx+260*sc, ty+52*sc),
-        (tx+260*sc, ty+84*sc), (tx+130*sc, ty+84*sc),
-    ]
-    d.polygon(body_pts, fill=ORANGE)
-    d.rounded_rectangle([(tx+132*sc, ty+5*sc), (tx+198*sc, ty+84*sc)], radius=4, fill=ORANGE)
-    d.rounded_rectangle([(tx+138*sc, ty+11*sc), (tx+192*sc, ty+46*sc)], radius=3, fill=BG)
-    d.rounded_rectangle([(tx+182*sc, ty-4*sc), (tx+192*sc, ty+16*sc)], radius=3, fill=ORANGE)
-    fw_cx, fw_cy = tx + 242*sc, ty + 97*sc
-    d.ellipse([(fw_cx-22*sc, fw_cy-22*sc), (fw_cx+22*sc, fw_cy+22*sc)], outline=ORANGE, width=8)
+    # Roter Button
+    btn_y = cta_y + 148
+    bw, bh = 500, 82
+    d.rounded_rectangle([(PAD, btn_y), (PAD + bw, btn_y + bh)], radius=10, fill=RED)
+    bb = d.textbbox((0, 0), "Meld dich jetzt!", font=f_btn)
+    tw = bb[2] - bb[0]; tbh = bb[3] - bb[1]
+    d.text((PAD + (bw - tw) // 2, btn_y + (bh - tbh) // 2),
+           "Meld dich jetzt!", fill=WHITE, font=f_btn)
 
-    d.line([(0, H - 140), (W, H - 140)], fill=DGRAY, width=1)
-    d.text((PAD, H - 120), "TSM Sued & Schweiz", fill=WHITE, font=f_md)
-    d.text((PAD, H - 62), "Daedong-Kioti  |  BW  |  RLP  |  SL  |  CH", fill=LGRAY, font=f_sm)
+    # Datum unten
+    d.text((PAD, TH - 50), f"{ctx['day']}, {ctx['date']}", fill=DGRAY, font=f_date)
 
-    return img
+    return canvas
+
+# ─── ROUTES ──────────────────────────────────────────────────────────────────
 
 @app.route('/')
 def health():
@@ -160,16 +227,37 @@ def health():
 
 @app.route('/daily')
 def daily():
-    return jsonify(build_data())
+    ctx = build_context()
+    m   = ctx['model']
+    text = (
+        f"Guten Morgen! \U0001f305\n\n"
+        f"{ctx['day']}, {ctx['date']}\n\n"
+        f"\U0001f69c {m['display']} \u2013 {m['series']} {m['ps']}\n\n"
+        f"{ctx['marketing']}\n\n"
+        f"\u2705 Meld dich jetzt!\n"
+        f"7 Jahre Garantie auf den Antriebsstrang."
+    )
+    return jsonify({
+        'day':       ctx['day'],
+        'date':      ctx['date'],
+        'model':     m['display'],
+        'series':    m['series'],
+        'ps':        m['ps'],
+        'marketing': ctx['marketing'],
+        'text':      text,
+    })
 
 @app.route('/image')
 def image():
-    data = build_data()
-    img  = draw_card(data)
-    buf  = io.BytesIO()
-    img.save(buf, format='PNG', optimize=True)
+    ctx = build_context()
+    img = compose(ctx)
+    buf = io.BytesIO()
+    img.save(buf, format='JPEG', quality=92, optimize=True)
     buf.seek(0)
-    return send_file(buf, mimetype='image/png', download_name='kioti_daily.png')
+    return send_file(buf, mimetype='image/jpeg',
+                     download_name='kioti_daily.jpg')
+
+# ─── ENTRY POINT ─────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
