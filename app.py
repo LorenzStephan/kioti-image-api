@@ -150,35 +150,38 @@ def compose(ctx) -> Image.Image:
             r.raise_for_status()
             bg = Image.open(io.BytesIO(r.content)).convert('RGB')
         except Exception:
-            bg = Image.new('RGB', (TW, TH), (15, 15, 15))
+            bg = Image.new('RGB', (1920, 1080), (15, 15, 15))
     else:
-        bg = Image.new('RGB', (TW, TH), (15, 15, 15))
+        bg = Image.new('RGB', (1920, 1080), (15, 15, 15))
 
-    # 2. Auf 9:16 Portrait zuschneiden
-    if bg.width / bg.height > TW / TH:
-        nw = int(bg.height * TW / TH)
-        bg = bg.crop(((bg.width - nw) // 2, 0,
-                      (bg.width - nw) // 2 + nw, bg.height))
-    else:
-        nh = int(bg.width * TH / TW)
-        bg = bg.crop((0, 0, bg.width, nh))
-    bg = bg.resize((TW, TH), Image.LANCZOS)
+    # 2. Auf volle Breite skalieren – KEIN Zuschneiden, ganzes Foto sichtbar
+    scale = TW / bg.width
+    photo_h = int(bg.height * scale)
+    photo = bg.resize((TW, photo_h), Image.LANCZOS)
 
-    # 3. Dunkler Gradient unten + oben
+    # 3. Dunkle Canvas als Hintergrund, Foto unterhalb Logo-Bereich
+    base_canvas = Image.new('RGB', (TW, TH), (12, 12, 12))
+    photo_y = 200
+    base_canvas.paste(photo, (0, photo_y))
+    photo_bottom = photo_y + photo_h
+
+    # 4. Gradients: Logo-Abdunklung oben + weicher Übergang am unteren Rand
     ov  = Image.new('RGBA', (TW, TH), (0, 0, 0, 0))
     dov = ImageDraw.Draw(ov)
-    s = int(TH * 0.32)
-    for y in range(TH - s):
-        a = int(220 * (y / (TH - s)) ** 1.15)
-        dov.line([(0, s + y), (TW, s + y)], fill=(0, 0, 0, min(a, 220)))
-    for y in range(180):
-        a = int(120 * (1 - y / 180))
+    # Oben: Logo-Bereich über dem Foto abdunkeln
+    for y in range(photo_y, min(photo_y + 220, TH)):
+        a = int(170 * (1 - (y - photo_y) / 220))
         dov.line([(0, y), (TW, y)], fill=(0, 0, 0, a))
+    # Unten: weicher Übergang am Ende des Fotos
+    fade_start = max(photo_bottom - 130, photo_y)
+    for y in range(fade_start, photo_bottom):
+        a = int(200 * ((y - fade_start) / max(photo_bottom - fade_start, 1)))
+        dov.line([(0, y), (TW, y)], fill=(0, 0, 0, min(a, 200)))
 
-    canvas = Image.alpha_composite(bg.convert('RGBA'), ov).convert('RGB')
+    canvas = Image.alpha_composite(base_canvas.convert('RGBA'), ov).convert('RGB')
     d = ImageDraw.Draw(canvas)
 
-    # 4. Fonts
+    # 5. Fonts
     f_logo   = load_font(100, bold=True)
     f_series = load_font(48)
     f_model  = load_font(130, bold=True)
@@ -191,11 +194,11 @@ def compose(ctx) -> Image.Image:
     PAD   = 80
     model = ctx['model']
 
-    # 5. KIOTI Logo oben links
+    # 6. KIOTI Logo oben links (auf dem Foto)
     d.text((PAD, 70), "KIOTI", fill=RED, font=f_logo)
 
-    # 6. Textblock unten
-    base_y = TH - 760
+    # 7. Textblock direkt unterhalb des Fotos
+    base_y = photo_bottom + 60
 
     d.text((PAD, base_y),
            f"{model['series']}  •  {model['ps']}", fill=LGRAY, font=f_series)
@@ -253,8 +256,8 @@ def daily():
         'ps':        m['ps'],
         'marketing': ctx['marketing'],
         'text':      text,
-        'quote':     text,        # ← Make.com Outlook "content" Feld
-        'photo_url': ctx['image']['download_url'] if ctx['image'] else '',  # ← NEU: Querformat-Original für E-Mail
+        'quote':     text,
+        'photo_url': ctx['image']['download_url'] if ctx['image'] else '',
     })
 
 
