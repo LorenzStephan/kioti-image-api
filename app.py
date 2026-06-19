@@ -4,9 +4,10 @@ import time
 import textwrap
 import requests
 from datetime import datetime
+from collections import deque
 from flask import Flask, jsonify, send_file
 from flask_cors import CORS
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 app = Flask(__name__)
 CORS(app)
@@ -14,6 +15,7 @@ CORS(app)
 GITHUB_REPO  = "LorenzStephan/kioti-image-api"
 GITHUB_API   = f"https://api.github.com/repos/{GITHUB_REPO}/contents"
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
+LOGO_URL     = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/kioti_logo.png"
 
 DAYS   = ['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag']
 MONTHS = ['Januar','Februar','Maerz','April','Mai','Juni',
@@ -43,12 +45,58 @@ MODEL_DB = {
     'HX1402':  {'series': 'HX SERIE', 'ps': '140 PS', 'display': 'HX1402ATC'},
 }
 
-_cache = {'images': [], 'ts': 0}
+# ─── CACHES ──────────────────────────────────────────────────────────────────
+_img_cache  = {'images': [], 'ts': 0}
+_logo_cache = {'logo': None}   # Logo wird einmal geladen + gecacht
+
+# ─── LOGO: Hintergrund entfernen ─────────────────────────────────────────────
+
+def _remove_bg(logo_pil, tolerance=5):
+    """Entfernt hellen Hintergrund per Flood-Fill von den Ecken.
+       Toleranz 5 → weißer Kojote (251-252) bleibt erhalten, BG (245) wird transparent."""
+    result = logo_pil.convert('RGBA').copy()
+    rd = result.load()
+    w, h = result.size
+    BG = 245
+    visited = set()
+    queue = deque()
+    for x in range(w): queue.extend([(x, 0), (x, h-1)])
+    for y in range(h): queue.extend([(0, y), (w-1, y)])
+    while queue:
+        x, y = queue.popleft()
+        if (x, y) in visited or x < 0 or y < 0 or x >= w or y >= h:
+            continue
+        visited.add((x, y))
+        pr, pg, pb, pa = rd[x, y]
+        if abs(pr-BG) <= tolerance and abs(pg-BG) <= tolerance and abs(pb-BG) <= tolerance:
+            rd[x, y] = (pr, pg, pb, 0)
+            for dx, dy in [(1,0),(-1,0),(0,1),(0,-1)]:
+                if (x+dx, y+dy) not in visited:
+                    queue.append((x+dx, y+dy))
+    return result
+
+def get_logo(target_w=320):
+    """Lädt KIOTI-Logo von GitHub, entfernt Hintergrund, cached Ergebnis."""
+    if _logo_cache['logo'] is not None:
+        return _logo_cache['logo']
+    try:
+        r = requests.get(LOGO_URL, timeout=10)
+        r.raise_for_status()
+        raw = Image.open(io.BytesIO(r.content))
+        logo = _remove_bg(raw)
+        scale = target_w / logo.width
+        logo = logo.resize((target_w, int(logo.height * scale)), Image.LANCZOS)
+        _logo_cache['logo'] = logo
+        return logo
+    except Exception:
+        return None   # Fallback: Text-Logo weiter unten
+
+# ─── BILDER-LISTE ─────────────────────────────────────────────────────────────
 
 def get_github_images():
-    global _cache
-    if time.time() - _cache['ts'] < 3600 and _cache['images']:
-        return _cache['images']
+    global _img_cache
+    if time.time() - _img_cache['ts'] < 3600 and _img_cache['images']:
+        return _img_cache['images']
     headers = {'Accept': 'application/vnd.github.v3+json'}
     if GITHUB_TOKEN:
         headers['Authorization'] = f'token {GITHUB_TOKEN}'
@@ -56,14 +104,14 @@ def get_github_images():
         r = requests.get(GITHUB_API, headers=headers, timeout=10)
         r.raise_for_status()
         files = [f for f in r.json()
-                 if isinstance(f, dict) and f.get('name', '').lower().endswith('.jpg')]
+                 if isinstance(f, dict) and f.get('name','').lower().endswith('.jpg')]
         if files:
-            _cache = {'images': files, 'ts': time.time()}
+            _img_cache = {'images': files, 'ts': time.time()}
             return files
     except Exception:
         pass
     raw_base = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main"
-    fallback_names = [
+    fallback = [
         "1_Kioti_CS2220_CS2520H - Kopie.jpg","48_Kioti_K92410_K92410C.jpg",
         "CK4030_P1076647.jpg","CK4030_P1076665.jpg","CK4030_P1076822.jpg",
         "CK5030H_P1075333.jpg","CK5030_P1076911.jpg","CK5030_P1076925.jpg",
@@ -74,8 +122,8 @@ def get_github_images():
         "KIOTI_HX1402ATC-EU_MediaWeek-.jpg",
     ]
     files = [{'name': n, 'download_url': f"{raw_base}/{requests.utils.quote(n)}"}
-             for n in fallback_names]
-    _cache = {'images': files, 'ts': time.time()}
+             for n in fallback]
+    _img_cache = {'images': files, 'ts': time.time()}
     return files
 
 def js_weekday():
@@ -121,7 +169,7 @@ def compose(ctx) -> Image.Image:
     LGRAY = (200, 200, 200)
     DGRAY = (140, 140, 140)
 
-    # 1. Foto laden
+    # 1. Traktorfoto laden
     if ctx['image']:
         try:
             r = requests.get(ctx['image']['download_url'], timeout=20)
@@ -132,34 +180,45 @@ def compose(ctx) -> Image.Image:
     else:
         bg = Image.new('RGB', (1920, 1080), (15, 15, 15))
 
-    # 2. Fit-to-width – ganzes Foto, KEIN Zuschneiden
-    scale    = TW / bg.width
-    photo_h  = int(bg.height * scale)
-    photo    = bg.resize((TW, photo_h), Image.LANCZOS)
+    # 2. Blur-Hintergrund füllt ganzen 9:16 Frame (kein schwarzes Loch)
+    bg_blur = bg.resize((TW, TH), Image.LANCZOS).filter(ImageFilter.GaussianBlur(40))
+    dark    = Image.new('RGB', (TW, TH), (0, 0, 0))
+    canvas  = Image.blend(bg_blur, dark, alpha=0.60)
 
-    # 3. Schwarze Canvas, Foto ab y=0 (oben)
-    canvas = Image.new('RGB', (TW, TH), (10, 10, 10))
+    # 3. Scharfes Originalfoto (fit-to-width, KEIN Zuschneiden) oben drauf
+    scale   = TW / bg.width
+    photo_h = int(bg.height * scale)
+    photo   = bg.resize((TW, photo_h), Image.LANCZOS)
     canvas.paste(photo, (0, 0))
 
-    # 4. Gradient-Overlay direkt auf dem Foto
+    # 4. Übergänge: Logo-Bereich + Foto-Unterkante + Textbereich
     ov  = Image.new('RGBA', (TW, TH), (0, 0, 0, 0))
     dov = ImageDraw.Draw(ov)
-    # Oben 200px: abdunkeln für Logo-Lesbarkeit
-    for y in range(200):
-        a = int(180 * (1 - y / 200))
+    for y in range(180):
+        a = int(160 * (1 - y / 180))
         dov.line([(0, y), (TW, y)], fill=(0, 0, 0, a))
-    # Untere 62% des Fotos: starker Gradient → Text lesbar
-    grad_start = int(photo_h * 0.38)
-    for y in range(grad_start, photo_h):
-        prog = (y - grad_start) / max(photo_h - grad_start, 1)
-        a    = int(245 * prog ** 0.75)
-        dov.line([(0, y), (TW, y)], fill=(0, 0, 0, min(a, 245)))
-
+    for y in range(photo_h - 140, photo_h):
+        a = int(230 * ((y - (photo_h - 140)) / 140))
+        dov.line([(0, y), (TW, y)], fill=(0, 0, 0, min(a, 230)))
+    for y in range(int(TH * 0.6), TH):
+        a = int(80 * ((y - int(TH * 0.6)) / (TH * 0.4)))
+        dov.line([(0, y), (TW, y)], fill=(0, 0, 0, min(a, 80)))
     canvas = Image.alpha_composite(canvas.convert('RGBA'), ov).convert('RGB')
+
+    # 5. KIOTI-Logo (roter Text + weißer Kojote) oben links
+    logo = get_logo(target_w=320)
+    if logo:
+        canvas_rgba = canvas.convert('RGBA')
+        canvas_rgba.paste(logo, (50, 30), mask=logo.split()[3])
+        canvas = canvas_rgba.convert('RGB')
+    else:
+        # Fallback: Text wenn Logo nicht erreichbar
+        d_tmp = ImageDraw.Draw(canvas)
+        d_tmp.text((80, 55), "KIOTI", fill=RED, font=load_font(100, bold=True))
+
     d = ImageDraw.Draw(canvas)
 
-    # 5. Fonts
-    f_logo   = load_font(100, bold=True)
+    # 6. Fonts
     f_series = load_font(48)
     f_model  = load_font(130, bold=True)
     f_body   = load_font(50,  bold=True)
@@ -168,14 +227,9 @@ def compose(ctx) -> Image.Image:
     f_btn    = load_font(52,  bold=True)
     f_date   = load_font(36)
 
-    PAD   = 80
-    model = ctx['model']
-
-    # 6. KIOTI Logo – oben links auf dem Foto
-    d.text((PAD, 55), "KIOTI", fill=RED, font=f_logo)
-
-    # 7. Textblock: direkt auf dem Foto, unter dem Logo
-    base_y = 250
+    PAD    = 80
+    model  = ctx['model']
+    base_y = TH - 760   # ← identisch zu Original-Bild 1
 
     d.text((PAD, base_y),
            f"{model['series']}  •  {model['ps']}", fill=LGRAY, font=f_series)
@@ -189,7 +243,6 @@ def compose(ctx) -> Image.Image:
     d.text((PAD, cta_y + 82),
            "7 Jahre Garantie auf den Antriebsstrang.", fill=DGRAY, font=f_small)
 
-    # Roter Button
     btn_y = cta_y + 148
     bw, bh = 500, 82
     d.rounded_rectangle([(PAD, btn_y), (PAD + bw, btn_y + bh)],
@@ -200,7 +253,6 @@ def compose(ctx) -> Image.Image:
     d.text((PAD + (bw - tw) // 2, btn_y + (bh - tbh) // 2),
            "Meld dich jetzt!", fill=WHITE, font=f_btn)
 
-    # Datum unten
     d.text((PAD, TH - 50),
            f"{ctx['day']}, {ctx['date']}", fill=DGRAY, font=f_date)
 
@@ -225,14 +277,9 @@ def daily():
         f"7 Jahre Garantie auf den Antriebsstrang."
     )
     return jsonify({
-        'day':       ctx['day'],
-        'date':      ctx['date'],
-        'model':     m['display'],
-        'series':    m['series'],
-        'ps':        m['ps'],
-        'marketing': ctx['marketing'],
-        'text':      text,
-        'quote':     text,
+        'day': ctx['day'], 'date': ctx['date'],
+        'model': m['display'], 'series': m['series'], 'ps': m['ps'],
+        'marketing': ctx['marketing'], 'text': text, 'quote': text,
         'photo_url': ctx['image']['download_url'] if ctx['image'] else '',
     })
 
@@ -243,8 +290,7 @@ def image():
     buf = io.BytesIO()
     img.save(buf, format='JPEG', quality=92, optimize=True)
     buf.seek(0)
-    return send_file(buf, mimetype='image/jpeg',
-                     download_name='kioti_daily.jpg')
+    return send_file(buf, mimetype='image/jpeg', download_name='kioti_daily.jpg')
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
