@@ -11,8 +11,6 @@ from PIL import Image, ImageDraw, ImageFont
 app = Flask(__name__)
 CORS(app)
 
-# ─── CONFIG ──────────────────────────────────────────────────────────────────
-
 GITHUB_REPO  = "LorenzStephan/kioti-image-api"
 GITHUB_API   = f"https://api.github.com/repos/{GITHUB_REPO}/contents"
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
@@ -45,19 +43,15 @@ MODEL_DB = {
     'HX1402':  {'series': 'HX SERIE', 'ps': '140 PS', 'display': 'HX1402ATC'},
 }
 
-# ─── IMAGE LIST CACHE (1 Stunde) ─────────────────────────────────────────────
-
 _cache = {'images': [], 'ts': 0}
 
 def get_github_images():
     global _cache
     if time.time() - _cache['ts'] < 3600 and _cache['images']:
         return _cache['images']
-
     headers = {'Accept': 'application/vnd.github.v3+json'}
     if GITHUB_TOKEN:
         headers['Authorization'] = f'token {GITHUB_TOKEN}'
-
     try:
         r = requests.get(GITHUB_API, headers=headers, timeout=10)
         r.raise_for_status()
@@ -68,37 +62,21 @@ def get_github_images():
             return files
     except Exception:
         pass
-
-    # Fallback: Hard-coded Dateinamen wenn GitHub API nicht erreichbar
     raw_base = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main"
     fallback_names = [
-        "1_Kioti_CS2220_CS2520H - Kopie.jpg",
-        "48_Kioti_K92410_K92410C.jpg",
-        "CK4030_P1076647.jpg",
-        "CK4030_P1076665.jpg",
-        "CK4030_P1076822.jpg",
-        "CK5030H_P1075333.jpg",
-        "CK5030_P1076911.jpg",
-        "CK5030_P1076925.jpg",
-        "CK_3530CH_FL_Oct_23 (1 von 25).jpg",
-        "CS2220_P1073567.jpg",
-        "CS2220_P1075471.jpg",
-        "CS2520_P1073682.jpg",
-        "CS2530CH_Kioti_025.jpg",
-        "CS2530CH_Kioti_026.jpg",
-        "CS2530CH_Kioti_027.jpg",
-        "CS2530CH_Kioti_073.jpg",
-        "CS2530CH_Kioti_078.jpg",
-        "K9_2410C_01_Jagd_IMC07434.jpg",
+        "1_Kioti_CS2220_CS2520H - Kopie.jpg","48_Kioti_K92410_K92410C.jpg",
+        "CK4030_P1076647.jpg","CK4030_P1076665.jpg","CK4030_P1076822.jpg",
+        "CK5030H_P1075333.jpg","CK5030_P1076911.jpg","CK5030_P1076925.jpg",
+        "CK_3530CH_FL_Oct_23 (1 von 25).jpg","CS2220_P1073567.jpg",
+        "CS2220_P1075471.jpg","CS2520_P1073682.jpg","CS2530CH_Kioti_025.jpg",
+        "CS2530CH_Kioti_026.jpg","CS2530CH_Kioti_027.jpg","CS2530CH_Kioti_073.jpg",
+        "CS2530CH_Kioti_078.jpg","K9_2410C_01_Jagd_IMC07434.jpg",
         "KIOTI_HX1402ATC-EU_MediaWeek-.jpg",
     ]
-    files = [{'name': n,
-              'download_url': f"{raw_base}/{requests.utils.quote(n)}"}
+    files = [{'name': n, 'download_url': f"{raw_base}/{requests.utils.quote(n)}"}
              for n in fallback_names]
     _cache = {'images': files, 'ts': time.time()}
     return files
-
-# ─── HELPERS ─────────────────────────────────────────────────────────────────
 
 def js_weekday():
     return (datetime.now().weekday() + 1) % 7
@@ -143,7 +121,7 @@ def compose(ctx) -> Image.Image:
     LGRAY = (200, 200, 200)
     DGRAY = (140, 140, 140)
 
-    # 1. Hintergrundbild von GitHub laden
+    # 1. Foto laden
     if ctx['image']:
         try:
             r = requests.get(ctx['image']['download_url'], timeout=20)
@@ -154,31 +132,30 @@ def compose(ctx) -> Image.Image:
     else:
         bg = Image.new('RGB', (1920, 1080), (15, 15, 15))
 
-    # 2. Auf volle Breite skalieren – KEIN Zuschneiden, ganzes Foto sichtbar
-    scale = TW / bg.width
-    photo_h = int(bg.height * scale)
-    photo = bg.resize((TW, photo_h), Image.LANCZOS)
+    # 2. Fit-to-width – ganzes Foto, KEIN Zuschneiden
+    scale    = TW / bg.width
+    photo_h  = int(bg.height * scale)
+    photo    = bg.resize((TW, photo_h), Image.LANCZOS)
 
-    # 3. Dunkle Canvas als Hintergrund, Foto unterhalb Logo-Bereich
-    base_canvas = Image.new('RGB', (TW, TH), (12, 12, 12))
-    photo_y = 200
-    base_canvas.paste(photo, (0, photo_y))
-    photo_bottom = photo_y + photo_h
+    # 3. Schwarze Canvas, Foto ab y=0 (oben)
+    canvas = Image.new('RGB', (TW, TH), (10, 10, 10))
+    canvas.paste(photo, (0, 0))
 
-    # 4. Gradients: Logo-Abdunklung oben + weicher Übergang am unteren Rand
+    # 4. Gradient-Overlay direkt auf dem Foto
     ov  = Image.new('RGBA', (TW, TH), (0, 0, 0, 0))
     dov = ImageDraw.Draw(ov)
-    # Oben: Logo-Bereich über dem Foto abdunkeln
-    for y in range(photo_y, min(photo_y + 220, TH)):
-        a = int(170 * (1 - (y - photo_y) / 220))
+    # Oben 200px: abdunkeln für Logo-Lesbarkeit
+    for y in range(200):
+        a = int(180 * (1 - y / 200))
         dov.line([(0, y), (TW, y)], fill=(0, 0, 0, a))
-    # Unten: weicher Übergang am Ende des Fotos
-    fade_start = max(photo_bottom - 130, photo_y)
-    for y in range(fade_start, photo_bottom):
-        a = int(200 * ((y - fade_start) / max(photo_bottom - fade_start, 1)))
-        dov.line([(0, y), (TW, y)], fill=(0, 0, 0, min(a, 200)))
+    # Untere 62% des Fotos: starker Gradient → Text lesbar
+    grad_start = int(photo_h * 0.38)
+    for y in range(grad_start, photo_h):
+        prog = (y - grad_start) / max(photo_h - grad_start, 1)
+        a    = int(245 * prog ** 0.75)
+        dov.line([(0, y), (TW, y)], fill=(0, 0, 0, min(a, 245)))
 
-    canvas = Image.alpha_composite(base_canvas.convert('RGBA'), ov).convert('RGB')
+    canvas = Image.alpha_composite(canvas.convert('RGBA'), ov).convert('RGB')
     d = ImageDraw.Draw(canvas)
 
     # 5. Fonts
@@ -194,11 +171,11 @@ def compose(ctx) -> Image.Image:
     PAD   = 80
     model = ctx['model']
 
-    # 6. KIOTI Logo oben links (auf dem Foto)
-    d.text((PAD, 70), "KIOTI", fill=RED, font=f_logo)
+    # 6. KIOTI Logo – oben links auf dem Foto
+    d.text((PAD, 55), "KIOTI", fill=RED, font=f_logo)
 
-    # 7. Textblock direkt unterhalb des Fotos
-    base_y = photo_bottom + 60
+    # 7. Textblock: direkt auf dem Foto, unter dem Logo
+    base_y = 250
 
     d.text((PAD, base_y),
            f"{model['series']}  •  {model['ps']}", fill=LGRAY, font=f_series)
@@ -235,7 +212,6 @@ def compose(ctx) -> Image.Image:
 def health():
     return jsonify({'status': 'ok', 'service': 'Kioti Daily Image API'})
 
-
 @app.route('/daily')
 def daily():
     ctx = build_context()
@@ -260,7 +236,6 @@ def daily():
         'photo_url': ctx['image']['download_url'] if ctx['image'] else '',
     })
 
-
 @app.route('/image')
 def image():
     ctx = build_context()
@@ -270,9 +245,6 @@ def image():
     buf.seek(0)
     return send_file(buf, mimetype='image/jpeg',
                      download_name='kioti_daily.jpg')
-
-
-# ─── ENTRY POINT ─────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
