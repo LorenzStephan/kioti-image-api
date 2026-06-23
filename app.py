@@ -298,26 +298,25 @@ if __name__ == '__main__':
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# ONEDRIVE-TEST v3  (NEU – abgesichert, kann NICHT mit 500 abstuerzen)
+# ONEDRIVE-TEST v4  (kurze Timeouts – kann Gunicorn nicht mehr ueberlasten)
 # ═══════════════════════════════════════════════════════════════════════════
 import base64 as _b64
 import re as _re
 import traceback as _tb
 
 def _onedrive_variants(share_url):
-    variants = []
-    base = share_url.split('?')[0]
-    if '?' in share_url:
-        variants.append(('D_amp_download', share_url + '&download=1'))
-    variants.append(('E_q_download', base + '?download=1'))
+    v = []
     m = _re.search(r'/personal/([^/]+)/(I[A-Za-z0-9_\-]+)', share_url)
     if m:
         host = share_url.split('/personal/')[0]
-        variants.append(('F_download_aspx',
+        # F zuerst: offizieller Download-Pfad, aussichtsreichster Treffer
+        v.append(('F_download_aspx',
             f"{host}/personal/{m.group(1)}/_layouts/15/download.aspx?share={m.group(2)}"))
-    gtoken = 'u!' + _b64.b64encode(share_url.encode()).decode().rstrip('=').replace('/', '_').replace('+', '-')
-    variants.append(('B_graph', f'https://graph.microsoft.com/v1.0/shares/{gtoken}/driveItem/content'))
-    return variants
+    base = share_url.split('?')[0]
+    v.append(('E_q_download', base + '?download=1'))
+    if '?' in share_url:
+        v.append(('D_amp_download', share_url + '&download=1'))
+    return v   # max 3 Methoden x 6s = max 18s < 30s Gunicorn-Limit
 
 @app.route('/test-onedrive')
 def test_onedrive():
@@ -325,30 +324,28 @@ def test_onedrive():
         share_url = os.environ.get('ONEDRIVE_TEST_URL', '').strip()
         if not share_url:
             return jsonify({'ok': False, 'error': 'ENV ONEDRIVE_TEST_URL ist leer.'}), 200
-        results = []
-        working = None
+        results, working = [], None
         for name, url in _onedrive_variants(share_url):
             try:
-                r = requests.get(url, timeout=20, allow_redirects=True, stream=True)
+                # connect-timeout 4s, read-timeout 6s -> bricht schnell ab
+                r = requests.get(url, timeout=(4, 6), allow_redirects=True, stream=True)
                 ct = r.headers.get('Content-Type', '')
-                # max 2 MB lesen, damit nichts den Speicher sprengt
-                chunk = r.raw.read(2_000_000, decode_content=True) or b''
+                chunk = r.raw.read(1_500_000, decode_content=True) or b''
                 is_image = ct.startswith('image/')
                 results.append({'method': name, 'status': r.status_code,
-                                'content_type': ct[:60], 'bytes_read': len(chunk),
+                                'content_type': ct[:50], 'bytes_read': len(chunk),
                                 'is_image': is_image})
                 if r.status_code == 200 and is_image and working is None:
-                    working = {'method': name, 'request_url': url[:140], 'content_type': ct}
+                    working = {'method': name, 'request_url': url[:150]}
                 r.close()
             except Exception as e:
-                results.append({'method': name, 'error': type(e).__name__ + ': ' + str(e)[:160]})
+                results.append({'method': name, 'error': type(e).__name__ + ': ' + str(e)[:120]})
         return jsonify({
             'ok': working is not None,
             'working_method': working,
             'all_attempts': results,
             'hint': ('ERFOLG! Diese Methode liefert das Bild.' if working else
-                     'Keine Methode lieferte ein Bild. Wir wechseln auf den Make-Weg.')
+                     'Keine schnelle Methode lieferte ein Bild. Make-Weg ist robuster.')
         }), 200
     except Exception as e:
-        return jsonify({'ok': False, 'fatal': type(e).__name__ + ': ' + str(e)[:200],
-                        'trace': _tb.format_exc()[-400:]}), 200
+        return jsonify({'ok': False, 'fatal': str(e)[:200], 'trace': _tb.format_exc()[-300:]}), 200
