@@ -15,7 +15,7 @@ CORS(app)
 GITHUB_REPO  = "LorenzStephan/kioti-image-api"
 GITHUB_API   = f"https://api.github.com/repos/{GITHUB_REPO}/contents"
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
-LOGO_URL     = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/kioti_logo.png"
+LOGO_URL     = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/logo.png"
 
 DAYS   = ['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag']
 MONTHS = ['Januar','Februar','Maerz','April','Mai','Juni',
@@ -95,13 +95,13 @@ _logo_cache = {'logo': None}   # Logo wird einmal geladen + gecacht
 
 # ─── LOGO: Hintergrund entfernen ─────────────────────────────────────────────
 
-def _remove_bg(logo_pil, tolerance=5):
-    """Entfernt hellen Hintergrund per Flood-Fill von den Ecken.
-       Toleranz 5 → weißer Kojote (251-252) bleibt erhalten, BG (245) wird transparent."""
+def _remove_bg(logo_pil, thresh=70):
+    """Entfernt SCHWARZEN Hintergrund per Flood-Fill von den Ecken.
+       Dunkle Randpixel (R,G,B alle < thresh) werden transparent.
+       Roter Schriftzug + weisser Kojote bleiben erhalten, da sie hell sind."""
     result = logo_pil.convert('RGBA').copy()
     rd = result.load()
     w, h = result.size
-    BG = 245
     visited = set()
     queue = deque()
     for x in range(w): queue.extend([(x, 0), (x, h-1)])
@@ -112,11 +112,18 @@ def _remove_bg(logo_pil, tolerance=5):
             continue
         visited.add((x, y))
         pr, pg, pb, pa = rd[x, y]
-        if abs(pr-BG) <= tolerance and abs(pg-BG) <= tolerance and abs(pb-BG) <= tolerance:
-            rd[x, y] = (pr, pg, pb, 0)
+        # schwarz = alle Kanaele dunkel
+        if pr < thresh and pg < thresh and pb < thresh:
+            rd[x, y] = (0, 0, 0, 0)
             for dx, dy in [(1,0),(-1,0),(0,1),(0,-1)]:
                 if (x+dx, y+dy) not in visited:
                     queue.append((x+dx, y+dy))
+    # Eingeschlossenes Schwarz (z.B. innen im "O") ebenfalls transparent machen
+    for yy in range(h):
+        for xx in range(w):
+            pr, pg, pb, pa = rd[xx, yy]
+            if pa != 0 and pr < thresh and pg < thresh and pb < thresh:
+                rd[xx, yy] = (0, 0, 0, 0)
     return result
 
 def get_logo(target_w=320):
