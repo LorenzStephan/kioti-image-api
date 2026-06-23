@@ -298,63 +298,57 @@ if __name__ == '__main__':
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# ONEDRIVE-TEST v2  (NEU – fasst nichts Bestehendes an)
-# Probiert MEHRERE Direkt-Download-Methoden fuer Geschaefts-SharePoint durch.
+# ONEDRIVE-TEST v3  (NEU – abgesichert, kann NICHT mit 500 abstuerzen)
 # ═══════════════════════════════════════════════════════════════════════════
 import base64 as _b64
 import re as _re
+import traceback as _tb
 
 def _onedrive_variants(share_url):
-    """Erzeugt moegliche Direkt-Download-URLs aus einem SharePoint/OneDrive-Link."""
     variants = []
     base = share_url.split('?')[0]
-    has_q = '?' in share_url
-
-    # D: &download=1 an bestehende Query anhaengen
-    if has_q:
+    if '?' in share_url:
         variants.append(('D_amp_download', share_url + '&download=1'))
-    # E: nur ?download=1 (alte Query entfernt)
     variants.append(('E_q_download', base + '?download=1'))
-    # F: SharePoint download.aspx?share=TOKEN  (oft der Treffer bei Business)
     m = _re.search(r'/personal/([^/]+)/(I[A-Za-z0-9_\-]+)', share_url)
     if m:
         host = share_url.split('/personal/')[0]
-        user_part, token = m.group(1), m.group(2)
         variants.append(('F_download_aspx',
-            f"{host}/personal/{user_part}/_layouts/15/download.aspx?share={token}"))
-    # B: Graph shares (meist 401 bei Business, aber zur Sicherheit dabei)
+            f"{host}/personal/{m.group(1)}/_layouts/15/download.aspx?share={m.group(2)}"))
     gtoken = 'u!' + _b64.b64encode(share_url.encode()).decode().rstrip('=').replace('/', '_').replace('+', '-')
     variants.append(('B_graph', f'https://graph.microsoft.com/v1.0/shares/{gtoken}/driveItem/content'))
     return variants
 
 @app.route('/test-onedrive')
 def test_onedrive():
-    share_url = os.environ.get('ONEDRIVE_TEST_URL', '').strip()
-    if not share_url:
-        return jsonify({'ok': False, 'error': 'ENV ONEDRIVE_TEST_URL ist leer. '
-                        'Bitte in Render unter Environment setzen.'}), 400
-    results = []
-    working = None
-    for name, url in _onedrive_variants(share_url):
-        try:
-            r = requests.get(url, timeout=25, allow_redirects=True)
-            ct = r.headers.get('Content-Type', '')
-            is_image = ct.startswith('image/')
-            results.append({'method': name, 'status': r.status_code,
-                            'content_type': ct, 'bytes': len(r.content),
-                            'is_image': is_image,
-                            'final_url': r.url[:120]})
-            if r.status_code == 200 and is_image and working is None:
-                working = {'method': name, 'request_url': url,
-                           'content_type': ct, 'bytes': len(r.content)}
-        except Exception as e:
-            results.append({'method': name, 'error': str(e)[:200]})
-    return jsonify({
-        'ok': working is not None,
-        'working_method': working,
-        'all_attempts': results,
-        'hint': ('ERFOLG! Diese Methode liefert das Bild – wir koennen OneDrive nutzen.'
-                 if working else
-                 'Keine Methode lieferte ein Bild. Der Geschaefts-Link verlangt '
-                 'Anmeldung. Wir wechseln auf den Make-Weg.')
-    })
+    try:
+        share_url = os.environ.get('ONEDRIVE_TEST_URL', '').strip()
+        if not share_url:
+            return jsonify({'ok': False, 'error': 'ENV ONEDRIVE_TEST_URL ist leer.'}), 200
+        results = []
+        working = None
+        for name, url in _onedrive_variants(share_url):
+            try:
+                r = requests.get(url, timeout=20, allow_redirects=True, stream=True)
+                ct = r.headers.get('Content-Type', '')
+                # max 2 MB lesen, damit nichts den Speicher sprengt
+                chunk = r.raw.read(2_000_000, decode_content=True) or b''
+                is_image = ct.startswith('image/')
+                results.append({'method': name, 'status': r.status_code,
+                                'content_type': ct[:60], 'bytes_read': len(chunk),
+                                'is_image': is_image})
+                if r.status_code == 200 and is_image and working is None:
+                    working = {'method': name, 'request_url': url[:140], 'content_type': ct}
+                r.close()
+            except Exception as e:
+                results.append({'method': name, 'error': type(e).__name__ + ': ' + str(e)[:160]})
+        return jsonify({
+            'ok': working is not None,
+            'working_method': working,
+            'all_attempts': results,
+            'hint': ('ERFOLG! Diese Methode liefert das Bild.' if working else
+                     'Keine Methode lieferte ein Bild. Wir wechseln auf den Make-Weg.')
+        }), 200
+    except Exception as e:
+        return jsonify({'ok': False, 'fatal': type(e).__name__ + ': ' + str(e)[:200],
+                        'trace': _tb.format_exc()[-400:]}), 200
