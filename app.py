@@ -21,14 +21,58 @@ DAYS   = ['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samst
 MONTHS = ['Januar','Februar','Maerz','April','Mai','Juni',
           'Juli','August','September','Oktober','November','Dezember']
 
-MARKETING = [
-    "Kioti Traktoren liefern erstklassige Qualitaet zu einem Preis, der dich nicht arm macht.",
-    "Zuverlaessig. Kraftvoll. Erschwinglich. Das ist Kioti.",
-    "Mehr Leistung. Weniger Kosten. 7 Jahre Garantie inklusive.",
-    "Der smarte Einstieg in die professionelle Landtechnik.",
-    "Qualitaet, die haelt. Garantie, die ueberzeugt. Preis, der begeistert.",
-    "Stark im Feld. Stark im Preis. Stark in der Garantie.",
-    "7 Jahre Sorglos-Garantie. Weil wir an unsere Traktoren glauben.",
+# THEMEN-ROTATION: jeder Tag ein anderes Verkaufsthema.
+# Felder pro Paket: slogan (Hauptzeile im Bild), sub (Unterzeile),
+#                    cta_titel (roter Aufruf), cta_zeile (Zeile darunter)
+THEMES = [
+    {   # 0 Garantie / Zuverlaessigkeit
+        "slogan": "Stark. Zuverlaessig. Guenstig.",
+        "sub":    "Kioti baut Traktoren, die halten – ohne dein Konto zu sprengen.",
+        "cta_titel": "Meld dich jetzt!",
+        "cta_zeile": "7 Jahre Garantie auf den Antriebsstrang.",
+    },
+    {   # 1 Finanzierung / Raten
+        "slogan": "Dein Traktor. Deine Rate.",
+        "sub":    "Profi-Technik schon ab kleiner Monatsrate – frag einfach nach.",
+        "cta_titel": "Schreib mir!",
+        "cta_zeile": "Ich rechne dir dein Angebot durch.",
+    },
+    {   # 2 Vorfuehrung / Probefahrt
+        "slogan": "Erst fahren. Dann staunen.",
+        "sub":    "Erlebe die Kraft selbst – vereinbare deine Probefahrt.",
+        "cta_titel": "Probefahrt sichern!",
+        "cta_zeile": "Eine Nachricht genuegt.",
+    },
+    {   # 3 Saison / Einsatz
+        "slogan": "Bereit fuer jede Saison.",
+        "sub":    "Maehen, laden, raeumen – ein Kioti macht das ganze Jahr mit.",
+        "cta_titel": "Jetzt informieren!",
+        "cta_zeile": "Der richtige Traktor fuer deinen Einsatz.",
+    },
+    {   # 4 Leistung / PS fuers Geld
+        "slogan": "Mehr PS. Weniger Kosten.",
+        "sub":    "Volle Leistung zum fairen Preis – das ist die Kioti-Rechnung.",
+        "cta_titel": "Meld dich!",
+        "cta_zeile": "Ich zeig dir, was in deinem Modell steckt.",
+    },
+    {   # 5 Service / Naehe (ohne direkten Aufruf)
+        "slogan": "Service, der naeh ist.",
+        "sub":    "Beratung und Ersatzteile aus deiner Region – nicht vom anderen Ende der Welt.",
+        "cta_titel": "Kioti in deiner Naehe.",
+        "cta_zeile": "Qualitaet mit Ruecken-Deckung.",
+    },
+    {   # 6 Komfort / Bedienung
+        "slogan": "Einsteigen. Loslegen.",
+        "sub":    "Intuitive Bedienung und top Uebersicht – vom ersten Tag an.",
+        "cta_titel": "Schreib mir!",
+        "cta_zeile": "Ich finde den passenden Kioti fuer dich.",
+    },
+    {   # 7 Direkter Aufruf
+        "slogan": "Dein naechster Traktor wartet.",
+        "sub":    "Warum noch zoegern? Der richtige Kioti steht schon bereit.",
+        "cta_titel": "Eine Nachricht genuegt!",
+        "cta_zeile": "Antworte auf diesen Status – ich melde mich.",
+    },
 ]
 
 MODEL_DB = {
@@ -146,7 +190,7 @@ def build_context():
         'day':       DAYS[wd],
         'date':      f"{now.day}. {MONTHS[now.month - 1]} {now.year}",
         'model':     extract_model(chosen['name'] if chosen else ''),
-        'marketing': MARKETING[wd % len(MARKETING)],
+        'theme':     THEMES[doy % len(THEMES)],
         'image':     chosen,
     }
 
@@ -235,23 +279,23 @@ def compose(ctx) -> Image.Image:
            f"{model['series']}  •  {model['ps']}", fill=LGRAY, font=f_series)
     d.text((PAD, base_y + 58), model['display'], fill=WHITE, font=f_model)
 
-    wrapped = textwrap.fill(ctx['marketing'], width=26)
+    th = ctx['theme']
+    wrapped = textwrap.fill(th['sub'], width=26)
     d.text((PAD, base_y + 225), wrapped, fill=WHITE, font=f_body)
 
     cta_y = base_y + 465
-    d.text((PAD, cta_y), "Meld dich jetzt!", fill=RED, font=f_cta)
-    d.text((PAD, cta_y + 82),
-           "7 Jahre Garantie auf den Antriebsstrang.", fill=DGRAY, font=f_small)
+    d.text((PAD, cta_y), th['cta_titel'], fill=RED, font=f_cta)
+    d.text((PAD, cta_y + 82), th['cta_zeile'], fill=DGRAY, font=f_small)
 
     btn_y = cta_y + 148
     bw, bh = 500, 82
     d.rounded_rectangle([(PAD, btn_y), (PAD + bw, btn_y + bh)],
                          radius=10, fill=RED)
-    bb  = d.textbbox((0, 0), "Meld dich jetzt!", font=f_btn)
+    bb  = d.textbbox((0, 0), th['cta_titel'], font=f_btn)
     tw  = bb[2] - bb[0]
     tbh = bb[3] - bb[1]
     d.text((PAD + (bw - tw) // 2, btn_y + (bh - tbh) // 2),
-           "Meld dich jetzt!", fill=WHITE, font=f_btn)
+           th['cta_titel'], fill=WHITE, font=f_btn)
 
     d.text((PAD, TH - 50),
            f"{ctx['day']}, {ctx['date']}", fill=DGRAY, font=f_date)
@@ -268,18 +312,20 @@ def health():
 def daily():
     ctx = build_context()
     m   = ctx['model']
+    th  = ctx['theme']
     text = (
         f"Guten Morgen! \U0001f305\n\n"
         f"{ctx['day']}, {ctx['date']}\n\n"
         f"\U0001f69c {m['display']} \u2013 {m['series']} {m['ps']}\n\n"
-        f"{ctx['marketing']}\n\n"
-        f"\u2705 Meld dich jetzt!\n"
-        f"7 Jahre Garantie auf den Antriebsstrang."
+        f"{th['slogan']}\n{th['sub']}\n\n"
+        f"\u2705 {th['cta_titel']}\n"
+        f"{th['cta_zeile']}"
     )
     return jsonify({
         'day': ctx['day'], 'date': ctx['date'],
         'model': m['display'], 'series': m['series'], 'ps': m['ps'],
-        'marketing': ctx['marketing'], 'text': text, 'quote': text,
+        'marketing': th['slogan'], 'text': text, 'quote': text,
+        'slogan': th['slogan'], 'cta': th['cta_titel'],
         'photo_url': ctx['image']['download_url'] if ctx['image'] else '',
     })
 
@@ -295,57 +341,3 @@ def image():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# ONEDRIVE-TEST v4  (kurze Timeouts – kann Gunicorn nicht mehr ueberlasten)
-# ═══════════════════════════════════════════════════════════════════════════
-import base64 as _b64
-import re as _re
-import traceback as _tb
-
-def _onedrive_variants(share_url):
-    v = []
-    m = _re.search(r'/personal/([^/]+)/(I[A-Za-z0-9_\-]+)', share_url)
-    if m:
-        host = share_url.split('/personal/')[0]
-        # F zuerst: offizieller Download-Pfad, aussichtsreichster Treffer
-        v.append(('F_download_aspx',
-            f"{host}/personal/{m.group(1)}/_layouts/15/download.aspx?share={m.group(2)}"))
-    base = share_url.split('?')[0]
-    v.append(('E_q_download', base + '?download=1'))
-    if '?' in share_url:
-        v.append(('D_amp_download', share_url + '&download=1'))
-    return v   # max 3 Methoden x 6s = max 18s < 30s Gunicorn-Limit
-
-@app.route('/test-onedrive')
-def test_onedrive():
-    try:
-        share_url = os.environ.get('ONEDRIVE_TEST_URL', '').strip()
-        if not share_url:
-            return jsonify({'ok': False, 'error': 'ENV ONEDRIVE_TEST_URL ist leer.'}), 200
-        results, working = [], None
-        for name, url in _onedrive_variants(share_url):
-            try:
-                # connect-timeout 4s, read-timeout 6s -> bricht schnell ab
-                r = requests.get(url, timeout=(4, 6), allow_redirects=True, stream=True)
-                ct = r.headers.get('Content-Type', '')
-                chunk = r.raw.read(1_500_000, decode_content=True) or b''
-                is_image = ct.startswith('image/')
-                results.append({'method': name, 'status': r.status_code,
-                                'content_type': ct[:50], 'bytes_read': len(chunk),
-                                'is_image': is_image})
-                if r.status_code == 200 and is_image and working is None:
-                    working = {'method': name, 'request_url': url[:150]}
-                r.close()
-            except Exception as e:
-                results.append({'method': name, 'error': type(e).__name__ + ': ' + str(e)[:120]})
-        return jsonify({
-            'ok': working is not None,
-            'working_method': working,
-            'all_attempts': results,
-            'hint': ('ERFOLG! Diese Methode liefert das Bild.' if working else
-                     'Keine schnelle Methode lieferte ein Bild. Make-Weg ist robuster.')
-        }), 200
-    except Exception as e:
-        return jsonify({'ok': False, 'fatal': str(e)[:200], 'trace': _tb.format_exc()[-300:]}), 200
