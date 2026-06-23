@@ -295,3 +295,55 @@ def image():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ONEDRIVE-TEST  (NEU – fasst nichts Bestehendes an)
+# Liest Test-Link aus ENV "ONEDRIVE_TEST_URL". Probiert beide Methoden durch.
+# ═══════════════════════════════════════════════════════════════════════════
+import base64 as _b64
+
+def _onedrive_variants(share_url):
+    """Erzeugt moegliche Direkt-Download-URLs aus einem SharePoint/OneDrive-Link."""
+    variants = []
+    # Methode A: ?download=1 anhaengen (ohne vorhandene Query)
+    base = share_url.split('?')[0]
+    variants.append(('A_download1', base + '?download=1'))
+    # Methode B: Microsoft Graph "shares" Token (oeffentlich, ohne Auth bei anonymen Links)
+    token = 'u!' + _b64.b64encode(share_url.encode()).decode().rstrip('=').replace('/', '_').replace('+', '-')
+    variants.append(('B_graph', f'https://graph.microsoft.com/v1.0/shares/{token}/driveItem/content'))
+    # Methode C: Original-Link unveraendert
+    variants.append(('C_raw', share_url))
+    return variants
+
+@app.route('/test-onedrive')
+def test_onedrive():
+    share_url = os.environ.get('ONEDRIVE_TEST_URL', '').strip()
+    if not share_url:
+        return jsonify({'ok': False, 'error': 'ENV ONEDRIVE_TEST_URL ist leer. '
+                        'Bitte in Render unter Environment setzen.'}), 400
+    results = []
+    working = None
+    for name, url in _onedrive_variants(share_url):
+        try:
+            r = requests.get(url, timeout=20, allow_redirects=True)
+            ct = r.headers.get('Content-Type', '')
+            is_image = ct.startswith('image/')
+            entry = {'method': name, 'status': r.status_code,
+                     'content_type': ct, 'bytes': len(r.content),
+                     'is_image': is_image}
+            results.append(entry)
+            if r.status_code == 200 and is_image and working is None:
+                working = {'method': name, 'url': url, 'content_type': ct,
+                           'bytes': len(r.content)}
+        except Exception as e:
+            results.append({'method': name, 'error': str(e)[:200]})
+    return jsonify({
+        'ok': working is not None,
+        'working_method': working,
+        'all_attempts': results,
+        'hint': ('ERFOLG: Methode gefunden – wir koennen OneDrive nutzen!'
+                 if working else
+                 'Keine Methode lieferte ein Bild. Vermutlich verlangt der Link '
+                 'doch eine Anmeldung. Dann brauchen wir den Make-Weg.')
+    })
