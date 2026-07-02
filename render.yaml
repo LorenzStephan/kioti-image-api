@@ -7,4 +7,28 @@ services:
     envVars:
       - key: ANTHROPIC_API_KEY
         sync: false
+      - key: FLASK_SECRET_KEY
+        sync: false
+      - key: ADMIN_USERNAME
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: SMTP_USE_SSL
+        sync: false
+      - key: DB_PATH
+        sync: false
+    disks:
+      - name: kioti-contacts-data
+        mountPath: /var/data
+        sizeGB: 1
     autoDeploy: true

@@ -11,10 +11,16 @@ from flask import Flask, jsonify, send_file
 from flask_cors import CORS
 from PIL import Image, ImageDraw, ImageFont, ImageFile, ImageFilter
 
+from contacts import contacts_bp, init_db
+
 ImageFile.LOAD_TRUNCATED_IMAGES = True   # falls ein Stream mal abbricht: trotzdem rendern statt crashen
 
 app = Flask(__name__)
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "kioti-messe-kontakte-dev-key")
 CORS(app)
+
+app.register_blueprint(contacts_bp)
+init_db(app)
 
 GITHUB_REPO  = "LorenzStephan/kioti-image-api"
 GITHUB_API   = f"https://api.github.com/repos/{GITHUB_REPO}/contents"
