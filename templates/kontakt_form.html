@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Neuer Kontakt &middot; KIOTI Messe{% endblock %}
+{% block content %}
+<div class="card">
+  <form method="post" action="{{ url_for('contacts.kontakt_submit') }}" autocomplete="off">
+    <label for="anrede">Anrede</label>
+    <select id="anrede" name="anrede">
+      <option value="">Bitte waehlen</option>
+      {% for a in anreden %}
+        <option value="{{ a }}" {% if form and form.anrede == a %}selected{% endif %}>{{ a }}</option>
+      {% endfor %}
+    </select>
+
+    <div class="row2">
+      <div>
+        <label for="vorname" class="required">Vorname</label>
+        <input type="text" id="vorname" name="vorname" required value="{{ form.vorname if form else '' }}">
+      </div>
+      <div>
+        <label for="nachname" class="required">Nachname</label>
+        <input type="text" id="nachname" name="nachname" required value="{{ form.nachname if form else '' }}">
+      </div>
+    </div>
+
+    <div class="row2">
+      <div>
+        <label for="strasse">Strasse</label>
+        <input type="text" id="strasse" name="strasse" value="{{ form.strasse if form else '' }}">
+      </div>
+      <div>
+        <label for="hausnummer">Hausnr.</label>
+        <input type="text" id="hausnummer" name="hausnummer" value="{{ form.hausnummer if form else '' }}">
+      </div>
+    </div>
+
+    <div class="row3">
+      <div>
+        <label for="plz">PLZ</label>
+        <input type="text" id="plz" name="plz" inputmode="numeric" value="{{ form.plz if form else '' }}">
+      </div>
+      <div>
+        <label for="ort">Ort</label>
+        <input type="text" id="ort" name="ort" value="{{ form.ort if form else '' }}">
+      </div>
+    </div>
+
+    <label for="land">Land</label>
+    <input type="text" id="land" name="land" list="laender" value="{{ form.land if form else 'Deutschland' }}">
+    <datalist id="laender">
+      <option value="Deutschland">
+      <option value="Oesterreich">
+      <option value="Schweiz">
+    </datalist>
+
+    <label for="email" class="required">E-Mail</label>
+    <input type="email" id="email" name="email" required value="{{ form.email if form else '' }}">
+    <div class="hint">Fuer die automatische Dankes-Mail nach der Messe.</div>
+
+    <label for="baureihe" class="required">Baureihe</label>
+    <select id="baureihe" name="baureihe" required>
+      <option value="">Bitte waehlen</option>
+      {% for b in baureihen %}
+        <option value="{{ b.code }}" {% if form and form.baureihe == b.code %}selected{% endif %}>{{ b.label }}</option>
+      {% endfor %}
+    </select>
+
+    <label for="notizen">Sonstige Notizen</label>
+    <textarea id="notizen" name="notizen" placeholder="z.B. besonderes Interesse, Kaufabsicht, Termin...">{{ form.notizen if form else '' }}</textarea>
+
+    <div class="checkbox-row">
+      <input type="checkbox" id="einwilligung" name="einwilligung" value="1" {% if form and form.einwilligung %}checked{% endif %} required>
+      <label for="einwilligung">Ich bin damit einverstanden, dass meine Angaben zum Zweck der Kontaktaufnahme
+        gespeichert und verwendet werden und ich eine E-Mail mit ersten Produktinformationen erhalte.</label>
+    </div>
+
+    <button type="submit" class="primary">Kontakt speichern</button>
+  </form>
+</div>
+{% endblock %}

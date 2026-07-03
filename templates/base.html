@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="theme-color" content="#cd1919">
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='logo.png') }}">
+  <title>{% block title %}KIOTI Messe-Kontakte{% endblock %}</title>
+  <style>
+    :root { --red: #cd1919; --dark: #1a1a1a; --gray: #666; --bg: #f4f4f4; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      background: var(--bg); color: var(--dark);
+    }
+    header {
+      background: var(--red); color: #fff; padding: 16px 20px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    header h1 { font-size: 1.15rem; margin: 0; font-weight: 700; }
+    main { max-width: 640px; margin: 0 auto; padding: 20px 16px 60px; }
+    .card { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+    label { display: block; font-weight: 600; margin: 16px 0 6px; font-size: .95rem; }
+    label.required::after { content: " *"; color: var(--red); }
+    input[type=text], input[type=email], input[type=tel], select, textarea {
+      width: 100%; padding: 14px 12px; font-size: 1rem; border: 1px solid #ccc;
+      border-radius: 8px; background: #fff; -webkit-appearance: none;
+    }
+    input:focus, select:focus, textarea:focus { outline: 2px solid var(--red); border-color: var(--red); }
+    textarea { min-height: 90px; resize: vertical; }
+    .row2 { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; }
+    .row3 { display: grid; grid-template-columns: 1fr 2fr; gap: 12px; }
+    .checkbox-row { display: flex; align-items: flex-start; gap: 10px; margin-top: 18px; }
+    .checkbox-row input { width: 22px; height: 22px; margin-top: 2px; flex-shrink: 0; }
+    .checkbox-row label { margin: 0; font-weight: 400; font-size: .9rem; }
+    button.primary {
+      width: 100%; padding: 16px; margin-top: 24px; font-size: 1.05rem; font-weight: 700;
+      background: var(--red); color: #fff; border: none; border-radius: 10px; cursor: pointer;
+    }
+    button.primary:active { opacity: .85; }
+    a.button-link {
+      display: block; text-align: center; text-decoration: none; width: 100%; padding: 16px;
+      margin-top: 16px; font-size: 1.05rem; font-weight: 700; background: var(--dark); color: #fff;
+      border-radius: 10px;
+    }
+    .flash { background: #fdecea; color: #a31212; border: 1px solid #f5c2c2; padding: 12px 14px;
+      border-radius: 8px; margin-bottom: 12px; font-size: .9rem; }
+    .hint { color: var(--gray); font-size: .82rem; margin-top: 4px; }
+    table { width: 100%; border-collapse: collapse; font-size: .85rem; background: #fff; }
+    th, td { padding: 8px 10px; border-bottom: 1px solid #eee; text-align: left; white-space: nowrap; }
+    th { background: #f0f0f0; position: sticky; top: 0; }
+    .table-wrap { overflow-x: auto; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+    .toolbar { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+    .toolbar input[type=text] { flex: 1; min-width: 160px; }
+    .toolbar a, .toolbar button { padding: 10px 16px; border-radius: 8px; border: none; font-weight: 600; }
+    .btn-secondary { background: var(--dark); color: #fff; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>KIOTI &middot; Messe-Kontakte</h1>
+  </header>
+  <main>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="flash">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register("{{ url_for('static', filename='sw.js') }}").catch(function () {});
+      });
+    }
+  </script>
+</body>
+</html>

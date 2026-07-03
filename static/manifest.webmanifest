@@ -1,0 +1,12 @@
+{
+  "name": "KIOTI Messe-Kontakte",
+  "short_name": "Kioti Kontakte",
+  "start_url": "/kontakt",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#cd1919",
+  "icons": [
+    { "src": "/static/logo.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/static/logo.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

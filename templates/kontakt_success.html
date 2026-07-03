@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Danke &middot; KIOTI Messe{% endblock %}
+{% block content %}
+<div class="card" style="text-align:center;">
+  <h2>Danke{{ ', ' + vorname if vorname else '' }}!</h2>
+  <p>Der Kontakt wurde gespeichert. Eine Dankes-Mail mit ersten Informationen ist unterwegs.</p>
+  <a class="button-link" href="{{ url_for('contacts.kontakt_form') }}">Naechsten Kontakt erfassen</a>
+</div>
+{% endblock %}
