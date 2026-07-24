@@ -25,6 +25,13 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 ANTHROPIC_URL     = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_MODEL   = "claude-haiku-4-5-20251001"   # guenstigstes Modell, reicht fuer kurze Marketingtexte
 
+# Sehr grosse Quellfotos (bis 32 MP) proportional auf diese Kantenlaenge
+# begrenzen. Ohne Begrenzung sprengt das mehrfache Kopieren/RGBA-Wandeln in
+# compose() den Speicher des Render-Free-Tiers (512 MB) und das JPEG-Encoding
+# laeuft in den Worker-Timeout -> Internal Server Error. Fuer WhatsApp-Status
+# reicht diese Aufloesung locker.
+MAX_PHOTO_DIM = 1600
+
 DAYS   = ['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag']
 MONTHS = ['Januar','Februar','Maerz','April','Mai','Juni',
           'Juli','August','September','Oktober','November','Dezember']
@@ -358,16 +365,23 @@ def compose(ctx) -> Image.Image:
 
     if ctx['image']:
         try:
-            raw_bytes = _safe_fetch(ctx['image']['download_url'], max_bytes=8_000_000)
+            raw_bytes = _safe_fetch(ctx['image']['download_url'], max_bytes=20_000_000)
             bg = Image.open(io.BytesIO(raw_bytes)).convert('RGB')
         except Exception:
             bg = Image.new('RGB', (1280, 800), (15, 15, 15))
     else:
         bg = Image.new('RGB', (1280, 800), (15, 15, 15))
 
-    # Foto bleibt UNVERAENDERT in Groesse und Seitenverhaeltnis - kein Resize,
-    # kein Zuschneiden. Text/Logo werden proportional zur tatsaechlichen
-    # Bildgroesse eingepasst, egal welches Format das Foto mitbringt.
+    # Seitenverhaeltnis bleibt erhalten, es wird NICHT zugeschnitten - sehr grosse
+    # Fotos (z.B. 32 MP) werden nur proportional heruntergerechnet. Ohne das killt
+    # das mehrfache Kopieren/RGBA-Wandeln unten den Worker (OOM/Timeout) -> 500.
+    if max(bg.size) > MAX_PHOTO_DIM:
+        scale = MAX_PHOTO_DIM / max(bg.size)
+        bg = bg.resize((max(1, round(bg.width * scale)),
+                        max(1, round(bg.height * scale))), Image.LANCZOS)
+
+    # Text/Logo werden proportional zur tatsaechlichen Bildgroesse eingepasst,
+    # egal welches Format das Foto mitbringt.
     W, H = bg.size
     canvas = bg.copy()
 
