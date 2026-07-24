@@ -222,7 +222,8 @@ def get_github_images():
         "CS2220_P1075471.jpg","CS2520_P1073682.jpg","CS2530CH_Kioti_025.jpg",
         "CS2530CH_Kioti_026.jpg","CS2530CH_Kioti_027.jpg","CS2530CH_Kioti_073.jpg",
         "CS2530CH_Kioti_078.jpg","K9_2410C_01_Jagd_IMC07434.jpg",
-        "KIOTI_HX1402ATC-EU_MediaWeek-.jpg",
+        "KIOTI_HX1402ATC-EU_MediaWeek-Edit-30.jpg",
+        "KIOTI_HX1402ATC-EU_MediaWeek-Edit-33.jpg",
     ]
     files = [{'name': n, 'download_url': f"{raw_base}/{requests.utils.quote(n)}"}
              for n in fallback]
